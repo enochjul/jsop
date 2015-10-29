@@ -6,7 +6,11 @@
 #define JSOP_DEFINES_H
 
 #ifndef JSOP_WORD_SIZE
-#define JSOP_WORD_SIZE 64
+	#ifdef __LP64__
+		#define JSOP_WORD_SIZE 64
+	#else
+		#define JSOP_WORD_SIZE 32
+	#endif
 #endif
 
 #ifndef JSOP_STRING_BUFFER_MIN_SIZE

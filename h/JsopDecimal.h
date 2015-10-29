@@ -6,7 +6,6 @@
 #define JSOP_DECIMAL_H
 
 #include <stdint.h>
-#include "JsopDefines.h"
 
 //! Converts the specified integer significand and exponent (of 10) to a double precision number
 double jsop_decimal_to_double(uint64_t significand, int exponent, bool negative) noexcept;

@@ -9,7 +9,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <type_traits>
 #include <utility>
 
 #include "JsopDecimal.h"
