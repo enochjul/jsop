@@ -2105,10 +2105,15 @@ JSOP_INLINE void jsop_uint_shift_left_x2(T *low, T *high, T value_low, T value_h
 //! Shifts the given value left by n bits, and returns the result as a double width integer
 template <typename T>
 JSOP_INLINE void jsop_uint_shift_left_x1(T *low, T *high, T value, int n) noexcept {
-	assert(n > 0 && n < sizeof(T) * CHAR_BIT);
+	assert(n > 0 && n < sizeof(T) * CHAR_BIT * 2);
 
-	*high = value >> (sizeof(T) * CHAR_BIT - n);
-	*low = value << n;
+	if (n >= sizeof(T) * CHAR_BIT) {
+		*high = value << (n - sizeof(T) * CHAR_BIT);
+		*low = 0;
+	} else {
+		*high = value >> (sizeof(T) * CHAR_BIT - n);
+		*low = value << n;
+	}
 }
 
 //! Shifts the given double width integer left by n bits
@@ -2545,10 +2550,10 @@ double jsop_decimal_to_double(uint64_t significand, int exponent, bool negative)
 					if (remainder_bits < 0) {
 						remainder_bits = -remainder_bits;
 						mantissa = (mantissa << remainder_bits) | (remainder >> (64 - remainder_bits));
-						remainder_bits = JSOP_WORD_SIZE - remainder_bits;
+						remainder_bits = 64 - remainder_bits;
 					} else {
 						mantissa >>= remainder_bits;
-						remainder_bits += JSOP_WORD_SIZE;
+						remainder_bits += 64;
 					}
 					assert(mantissa >= (UINT64_C(1) << (DBL_MANT_DIG + 1)) && mantissa < (UINT64_C(1) << (DBL_MANT_DIG + 2)));
 					if (abs_exponent < jsop_get_array_size(JsopSmallPowersOfFive)) {
@@ -2713,12 +2718,7 @@ double jsop_decimal_to_double(uint64_t significand, int exponent, bool negative)
 					final_exponent = exponent + mantissa_high_bits - 1;
 					remainder_bits = DBL_MANT_DIG + 2 - mantissa_high_bits;
 					remainder = 0;
-					if (remainder_bits >= 32) {
-						mantissa_high = mantissa_low << (remainder_bits - 32);
-						mantissa_low = 0;
-					} else {
-						jsop_uint_shift_left_x1(&mantissa_low, &mantissa_high, mantissa_low, remainder_bits);
-					}
+					jsop_uint_shift_left_x1(&mantissa_low, &mantissa_high, mantissa_low, remainder_bits);
 				}
 			} else {
 				return negative ? -0. : 0.;
