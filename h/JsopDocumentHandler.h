@@ -53,6 +53,12 @@ public:
 	JsopDocumentHandler(const JsopDocumentHandler &) = delete;
 	JsopDocumentHandler &operator =(const JsopDocumentHandler &) = delete;
 
+	//! Check if strings need a null terminator character at the end
+	bool requireNullTerminator() const noexcept {
+		//No need to null terminate strings since it will copy the string anyway
+		return false;
+	}
+
 	//! Initializes the parsing
 	bool start() noexcept;
 	//! Finish the parsing by moving the parsed values into the given document
@@ -152,6 +158,9 @@ public:
 
 	//! Makes a null-terminated string indicated by the (start, end) pair
 	bool makeString(const char *start, const char *end) noexcept;
+	bool makeString(const char *start, const char *end, bool) noexcept {
+		return makeString(start, end);
+	}
 
 	//! Makes a new array, and push the context to add subsequent values to the array
 	JSOP_INLINE bool pushArray() noexcept {

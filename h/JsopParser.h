@@ -2092,7 +2092,7 @@ state_string_chars:
 			if (ch >= 0x20) {
 				switch (ch) {
 				case '"':
-					if (H::makeString(Buffer.getStart(), Buffer.getEnd())) {
+					if ((!H::requireNullTerminator() || Buffer.append('\0')) && H::makeString(Buffer.getStart(), Buffer.getEnd(), ParsingKey)) {
 						if (!H::inTop()) {
 							if (!ParsingKey) {
 								if (H::inArray()) {
