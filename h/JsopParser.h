@@ -81,6 +81,15 @@ class JsopParser final : public H {
 		StringEscapedUtf16SurrogateHex2,
 		StringEscapedUtf16SurrogateHex3,
 		StringEscapedUtf16SurrogateHex4,
+#ifdef JSOP_PARSE_BRACKET_ESCAPE
+		StringEscapedUtf32HexFirst,
+		StringEscapedUtf32Hex,
+		StringEscapedUtf32SurrogateHex1,
+		StringEscapedUtf32SurrogateHex2,
+		StringEscapedUtf32SurrogateHex3,
+		StringEscapedUtf32SurrogateHex4,
+		StringEscapedUtf32SurrogateRightBracket,
+#endif
 		StringUtf8_0xF0,
 		StringUtf8Trail3,
 		StringUtf8_0xF4,
@@ -464,6 +473,29 @@ dispatch_state:
 
 	case StringEscapedUtf16SurrogateHex4:
 		goto state_string_escaped_utf16_surrogate_hex_4;
+
+#ifdef JSOP_PARSE_BRACKET_ESCAPE
+	case StringEscapedUtf32HexFirst:
+		goto state_string_escaped_utf32_hex_first;
+
+	case StringEscapedUtf32Hex:
+		goto state_string_escaped_utf32_hex;
+
+	case StringEscapedUtf32SurrogateHex1:
+		goto state_string_escaped_utf32_surrogate_hex_1;
+
+	case StringEscapedUtf32SurrogateHex2:
+		goto state_string_escaped_utf32_surrogate_hex_2;
+
+	case StringEscapedUtf32SurrogateHex3:
+		goto state_string_escaped_utf32_surrogate_hex_3;
+
+	case StringEscapedUtf32SurrogateHex4:
+		goto state_string_escaped_utf32_surrogate_hex_4;
+
+	case StringEscapedUtf32SurrogateRightBracket:
+		goto state_string_escaped_utf32_surrogate_right_bracket;
+#endif
 
 	case StringUtf8_0xF0:
 		goto state_string_utf8_0xF0;
@@ -2291,6 +2323,11 @@ state_string_escaped_utf16_hex_1:
 			CurrentUtf32 = (ch - 'a' + 10) * 4096;
 			goto state_string_escaped_utf16_hex_2;
 
+#ifdef JSOP_PARSE_BRACKET_ESCAPE
+		case '{':
+			goto state_string_escaped_utf32_hex_first;
+#endif
+
 		default:
 			goto cleanup_on_error;
 		}
@@ -2523,6 +2560,11 @@ state_string_escaped_utf16_surrogate_hex_1:
 		case 'd':
 			goto state_string_escaped_utf16_surrogate_hex_2;
 
+#ifdef JSOP_PARSE_BRACKET_ESCAPE
+		case '{':
+			goto state_string_escaped_utf32_surrogate_hex_1;
+#endif
+
 		default:
 			goto cleanup_on_error;
 		}
@@ -2668,6 +2710,324 @@ state_string_escaped_utf16_surrogate_hex_4:
 	} else {
 		JSOP_PARSER_RETURN(StringEscapedUtf16SurrogateHex4);
 	}
+
+#ifdef JSOP_PARSE_BRACKET_ESCAPE
+state_string_escaped_utf32_hex_first:
+	if (start != end) {
+		ch = *start;
+		++start, ++cur_column;
+		switch (ch) {
+		case '\0':
+			if (end == nullptr) {
+				JSOP_PARSER_RETURN(StringEscapedUtf32HexFirst);
+			} else {
+				goto cleanup_on_error;
+			}
+
+		case '0':
+			CurrentUtf32 = 0;
+			goto state_string_escaped_utf32_hex_first;
+
+		case '1':
+		case '2':
+		case '3':
+		case '4':
+		case '5':
+		case '6':
+		case '7':
+		case '8':
+		case '9':
+			CurrentUtf32 = ch - '0';
+			goto state_string_escaped_utf32_hex;
+
+		case 'A':
+		case 'B':
+		case 'C':
+		case 'D':
+		case 'E':
+		case 'F':
+			CurrentUtf32 = (ch - 'A' + 10);
+			goto state_string_escaped_utf32_hex;
+
+		case 'a':
+		case 'b':
+		case 'c':
+		case 'd':
+		case 'e':
+		case 'f':
+			CurrentUtf32 = (ch - 'a' + 10);
+			goto state_string_escaped_utf32_hex;
+
+		default:
+			goto cleanup_on_error;
+		}
+	} else {
+		JSOP_PARSER_RETURN(StringEscapedUtf32HexFirst);
+	}
+
+state_string_escaped_utf32_hex:
+	if (start != end) {
+		ch = *start;
+		++start, ++cur_column;
+		switch (ch) {
+		case '\0':
+			if (end == nullptr) {
+				JSOP_PARSER_RETURN(StringEscapedUtf32Hex);
+			} else {
+				goto cleanup_on_error;
+			}
+
+		case '0':
+		case '1':
+		case '2':
+		case '3':
+		case '4':
+		case '5':
+		case '6':
+		case '7':
+		case '8':
+		case '9':
+			CurrentUtf32 = CurrentUtf32 * 16 + (ch - '0');
+			if (CurrentUtf32 < 0x110000) {
+				goto state_string_escaped_utf32_hex;
+			} else {
+				goto cleanup_on_error;
+			}
+
+		case 'A':
+		case 'B':
+		case 'C':
+		case 'D':
+		case 'E':
+		case 'F':
+			CurrentUtf32 = CurrentUtf32 * 16 + (ch - 'A' + 10);
+			if (CurrentUtf32 < 0x110000) {
+				goto state_string_escaped_utf32_hex;
+			} else {
+				goto cleanup_on_error;
+			}
+
+		case 'a':
+		case 'b':
+		case 'c':
+		case 'd':
+		case 'e':
+		case 'f':
+			CurrentUtf32 = CurrentUtf32 * 16 + (ch - 'a' + 10);
+			if (CurrentUtf32 < 0x110000) {
+				goto state_string_escaped_utf32_hex;
+			} else {
+				goto cleanup_on_error;
+			}
+
+		case '}':
+			if (CurrentUtf32 < 0xD800 || CurrentUtf32 >= 0xE000) {
+				if (Buffer.appendUtf32(CurrentUtf32)) {
+					goto state_string_chars;
+				} else {
+					goto cleanup_on_error;
+				}
+			} else if (CurrentUtf32 <= 0xDBFF) {
+				//Utf16 high surrogate
+				CurrentUtf32 = (CurrentUtf32 - 0xD800) * 1024 + 0x10000;
+				goto state_string_escaped_utf16_surrogate_backslash;
+			} else {
+				//Utf16 low surrogate should not be encountered first
+				goto cleanup_on_error;
+			}
+
+		default:
+			goto cleanup_on_error;
+		}
+	} else {
+		JSOP_PARSER_RETURN(StringEscapedUtf32Hex);
+	}
+
+state_string_escaped_utf32_surrogate_hex_1:
+	if (start != end) {
+		ch = *start;
+		++start, ++cur_column;
+		switch (ch) {
+		case '\0':
+			if (end == nullptr) {
+				JSOP_PARSER_RETURN(StringEscapedUtf32SurrogateHex1);
+			} else {
+				goto cleanup_on_error;
+			}
+
+		case '0':
+			goto state_string_escaped_utf32_surrogate_hex_1;
+
+		case 'D':
+		case 'd':
+			goto state_string_escaped_utf32_surrogate_hex_2;
+
+		default:
+			goto cleanup_on_error;
+		}
+	} else {
+		JSOP_PARSER_RETURN(StringEscapedUtf32SurrogateHex1);
+	}
+
+state_string_escaped_utf32_surrogate_hex_2:
+	if (start != end) {
+		ch = *start;
+		++start, ++cur_column;
+		switch (ch) {
+		case '\0':
+			if (end == nullptr) {
+				JSOP_PARSER_RETURN(StringEscapedUtf32SurrogateHex2);
+			} else {
+				goto cleanup_on_error;
+			}
+
+		case 'C':
+		case 'D':
+		case 'E':
+		case 'F':
+			CurrentUtf32 += (ch - 'C') * 256;
+			goto state_string_escaped_utf32_surrogate_hex_3;
+
+		case 'c':
+		case 'd':
+		case 'e':
+		case 'f':
+			CurrentUtf32 += (ch - 'c') * 256;
+			goto state_string_escaped_utf32_surrogate_hex_3;
+
+		default:
+			goto cleanup_on_error;
+		}
+	} else {
+		JSOP_PARSER_RETURN(StringEscapedUtf32SurrogateHex2);
+	}
+
+state_string_escaped_utf32_surrogate_hex_3:
+	if (start != end) {
+		ch = *start;
+		++start, ++cur_column;
+		switch (ch) {
+		case '\0':
+			if (end == nullptr) {
+				JSOP_PARSER_RETURN(StringEscapedUtf32SurrogateHex3);
+			} else {
+				goto cleanup_on_error;
+			}
+
+		case '0':
+		case '1':
+		case '2':
+		case '3':
+		case '4':
+		case '5':
+		case '6':
+		case '7':
+		case '8':
+		case '9':
+			CurrentUtf32 += (ch - '0') * 16;
+			goto state_string_escaped_utf32_surrogate_hex_4;
+
+		case 'A':
+		case 'B':
+		case 'C':
+		case 'D':
+		case 'E':
+		case 'F':
+			CurrentUtf32 += (ch - 'A' + 10) * 16;
+			goto state_string_escaped_utf32_surrogate_hex_4;
+
+		case 'a':
+		case 'b':
+		case 'c':
+		case 'd':
+		case 'e':
+		case 'f':
+			CurrentUtf32 += (ch - 'a' + 10) * 16;
+			goto state_string_escaped_utf32_surrogate_hex_4;
+
+		default:
+			goto cleanup_on_error;
+		}
+	} else {
+		JSOP_PARSER_RETURN(StringEscapedUtf32SurrogateHex3);
+	}
+
+state_string_escaped_utf32_surrogate_hex_4:
+	if (start != end) {
+		ch = *start;
+		++start, ++cur_column;
+		switch (ch) {
+		case '\0':
+			if (end == nullptr) {
+				JSOP_PARSER_RETURN(StringEscapedUtf32SurrogateHex4);
+			} else {
+				goto cleanup_on_error;
+			}
+
+		case '0':
+		case '1':
+		case '2':
+		case '3':
+		case '4':
+		case '5':
+		case '6':
+		case '7':
+		case '8':
+		case '9':
+			CurrentUtf32 += (ch - '0');
+			goto state_string_escaped_utf32_surrogate_right_bracket;
+
+		case 'A':
+		case 'B':
+		case 'C':
+		case 'D':
+		case 'E':
+		case 'F':
+			CurrentUtf32 += (ch - 'A' + 10);
+			goto state_string_escaped_utf32_surrogate_right_bracket;
+
+		case 'a':
+		case 'b':
+		case 'c':
+		case 'd':
+		case 'e':
+		case 'f':
+			CurrentUtf32 += (ch - 'a' + 10);
+			goto state_string_escaped_utf32_surrogate_right_bracket;
+
+		default:
+			goto cleanup_on_error;
+		}
+	} else {
+		JSOP_PARSER_RETURN(StringEscapedUtf32SurrogateHex4);
+	}
+
+state_string_escaped_utf32_surrogate_right_bracket:
+	if (start != end) {
+		ch = *start;
+		++start, ++cur_column;
+		switch (ch) {
+		case '\0':
+			if (end == nullptr) {
+				JSOP_PARSER_RETURN(StringEscapedUtf32SurrogateRightBracket);
+			} else {
+				goto cleanup_on_error;
+			}
+
+		case '}':
+			if (Buffer.appendUtf32(CurrentUtf32)) {
+				goto state_string_chars;
+			} else {
+				goto cleanup_on_error;
+			}
+
+		default:
+			goto cleanup_on_error;
+		}
+	} else {
+		JSOP_PARSER_RETURN(StringEscapedUtf32SurrogateRightBracket);
+	}
+#endif
 
 state_string_utf8_0xF0:
 	if (start != end) {
