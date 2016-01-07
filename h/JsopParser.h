@@ -35,6 +35,10 @@ class JsopParser final : public H {
 		ExponentSignOrFirstDigit,
 		ExponentFirstDigit,
 		Exponent,
+#ifdef JSOP_PARSE_BINARY
+		BinaryFirstDigit,
+		BinaryNumber,
+#endif
 #ifdef JSOP_PARSE_HEXADECIMAL
 		HexDotOrFirstDigit,
 		HexNumber,
@@ -274,6 +278,14 @@ bool JsopParser<H>::parseEndOfStream() noexcept(H::NoExceptions) {
 		}
 		goto cleanup_on_error;
 
+#ifdef JSOP_PARSE_BINARY
+	case BinaryNumber:
+		if (H::makeInteger(CurrentInteger, Negate)) {
+			break;
+		}
+		goto cleanup_on_error;
+#endif
+
 #ifdef JSOP_PARSE_HEXADECIMAL
 	case HexNumber:
 		if (H::makeInteger(CurrentInteger, Negate)) {
@@ -351,6 +363,14 @@ dispatch_state:
 
 	case Exponent:
 		goto state_exponent;
+
+#ifdef JSOP_PARSE_BINARY
+	case BinaryFirstDigit:
+		goto state_binary_first_digit;
+
+	case BinaryNumber:
+		goto state_binary_number;
+#endif
 
 #ifdef JSOP_PARSE_HEXADECIMAL
 	case HexDotOrFirstDigit:
@@ -754,6 +774,12 @@ state_zero:
 			CurrentExponent = 0;
 			goto state_exponent_sign_or_first_digit;
 
+#ifdef JSOP_PARSE_BINARY
+		case 'b':
+		case 'B':
+			goto state_binary_first_digit;
+#endif
+
 #ifdef JSOP_PARSE_HEXADECIMAL
 		case 'x':
 		case 'X':
@@ -1129,6 +1155,107 @@ state_exponent:
 	} else {
 		JSOP_PARSER_RETURN(Exponent);
 	}
+
+#ifdef JSOP_PARSE_BINARY
+state_binary_first_digit:
+	if (start != end) {
+		ch = *start;
+		++start, ++cur_column;
+		switch (ch) {
+		case '\0':
+			if (end == nullptr) {
+				JSOP_PARSER_RETURN(BinaryFirstDigit);
+			} else {
+				goto cleanup_on_error;
+			}
+
+		case '0':
+		case '1':
+			CurrentInteger = ch - '0';
+			goto state_binary_number;
+
+		default:
+			goto cleanup_on_error;
+		}
+	} else {
+		JSOP_PARSER_RETURN(BinaryFirstDigit);
+	}
+
+state_binary_number:
+	if (start != end) {
+		ch = *start;
+		++start, ++cur_column;
+		switch (ch) {
+		case '\0':
+			if (end == nullptr) {
+				JSOP_PARSER_RETURN(BinaryNumber);
+			} else {
+				goto cleanup_on_error;
+			}
+
+		case '0':
+		case '1':
+#ifdef JSOP_IGNORE_OVERFLOW
+			CurrentInteger = CurrentInteger * 2 + (ch - '0');
+			goto state_binary_number;
+#else
+			old_integer = CurrentInteger;
+			CurrentInteger = old_integer * 2 + (ch - '0');
+			if (JSOP_LIKELY(old_integer <= UINT64_C(0x7FFFFFFFFFFFFFFF))) {
+				goto state_binary_number;
+			} else {
+				goto cleanup_on_error;
+			}
+#endif
+
+		case ',':
+			if (!H::inTop()) {
+				if (H::makeInteger(CurrentInteger, Negate)) {
+					JSOP_PARSER_COMMA_COMMON_ACTION;
+				}
+			}
+			goto cleanup_on_error;
+
+		case ']':
+			//Add the new value and create the array
+			if (H::makeInteger(CurrentInteger, Negate)) {
+				goto action_array_close_brace;
+			}
+			goto cleanup_on_error;
+
+		case '}':
+			//Add the new value and create the array
+			if (H::makeInteger(CurrentInteger, Negate)) {
+				goto action_object_close_brace;
+			}
+			goto cleanup_on_error;
+
+		case '\n':
+			++cur_line;
+			cur_column = 1;
+		case ' ':
+		case '\t':
+		case '\r':
+			if (H::makeInteger(CurrentInteger, Negate)) {
+				JSOP_PARSER_PUSH_VALUE_EPILOGUE;
+			}
+			goto cleanup_on_error;
+
+#ifdef JSOP_PARSE_COMMENT
+		case '/':
+			if (H::makeInteger(CurrentInteger, Negate)) {
+				JSOP_PARSER_PUSH_VALUE_COMMENT_EPILOGUE;
+			}
+			goto cleanup_on_error;
+#endif
+
+		default:
+			goto cleanup_on_error;
+		}
+	} else {
+		JSOP_PARSER_RETURN(BinaryNumber);
+	}
+#endif
 
 #ifdef JSOP_PARSE_HEXADECIMAL
 state_hex_dot_or_first_digit:
@@ -2725,9 +2852,6 @@ state_string_escaped_utf32_hex_first:
 			}
 
 		case '0':
-			CurrentUtf32 = 0;
-			goto state_string_escaped_utf32_hex_first;
-
 		case '1':
 		case '2':
 		case '3':
