@@ -6,6 +6,7 @@ Additional features not in JSON:
 * Trailing comma before `]` or `}`
 * Infinity/nan literals
 * Hexadecimal floating point numbers
+* Unquoted object key (partial support)
 
 Sample usage for parsing a null-terminated string:
 

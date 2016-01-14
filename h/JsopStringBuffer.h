@@ -53,8 +53,6 @@ public:
 
 	//! Appends the given character to the string
 	JSOP_INLINE bool append(char ch) noexcept {
-		assert(ch >= 0 && ch <= 127);
-
 		if (End == AllocEnd) {
 			if (resize() == nullptr) {
 				return false;

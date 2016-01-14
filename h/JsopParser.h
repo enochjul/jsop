@@ -17,6 +17,10 @@
 #include "JsopMemoryPools.h"
 #include "JsopStringBuffer.h"
 
+#ifdef JSOP_PARSE_UNQUOTED_KEY
+#include "JsopCodePoint.h"
+#endif
+
 class JsopDocument;
 class JsopValue;
 
@@ -106,6 +110,16 @@ class JsopParser final : public H {
 		KeyValues,
 		KeySeparator,
 		KeyValuesSeparatorOrClose,
+#ifdef JSOP_PARSE_UNQUOTED_KEY
+		UnquotedKeyIdContinue,
+		UnquotedKeyUtf8_0xF0,
+		UnquotedKeyUtf8Trail3,
+		UnquotedKeyUtf8_0xF4,
+		UnquotedKeyUtf8_0xE0,
+		UnquotedKeyUtf8Trail2,
+		UnquotedKeyUtf8_0xED,
+		UnquotedKeyUtf8Trail1,
+#endif
 #ifdef JSOP_PARSE_COMMENT
 		SingleOrMultiLineComment,
 		SingleLineComment,
@@ -135,6 +149,9 @@ class JsopParser final : public H {
 #endif
 #ifdef JSOP_PARSE_UTF8_BYTE_ORDER_MARK
 	bool SkippedUtf8ByteOrderMark;
+#endif
+#ifdef JSOP_PARSE_UNQUOTED_KEY
+	bool ParsingIdContinue;
 #endif
 
 	//! Makes a infinity value
@@ -552,6 +569,32 @@ dispatch_state:
 
 	case KeyValuesSeparatorOrClose:
 		goto state_key_values_separator_or_close;
+
+#ifdef JSOP_PARSE_UNQUOTED_KEY
+	case UnquotedKeyIdContinue:
+		goto state_unquoted_key_id_continue;
+
+	case UnquotedKeyUtf8_0xF0:
+		goto state_unquoted_key_utf8_0xF0;
+
+	case UnquotedKeyUtf8Trail3:
+		goto state_unquoted_key_utf8_trail_3;
+
+	case UnquotedKeyUtf8_0xF4:
+		goto state_unquoted_key_utf8_0xF4;
+
+	case UnquotedKeyUtf8_0xE0:
+		goto state_unquoted_key_utf8_0xE0;
+
+	case UnquotedKeyUtf8Trail2:
+		goto state_unquoted_key_utf8_trail_2;
+
+	case UnquotedKeyUtf8_0xED:
+		goto state_unquoted_key_utf8_0xED;
+
+	case UnquotedKeyUtf8Trail1:
+		goto state_unquoted_key_utf8_trail_1;
+#endif
 
 #ifdef JSOP_PARSE_COMMENT
 	case SingleOrMultiLineComment:
@@ -3478,7 +3521,94 @@ state_key_values:
 #endif
 
 		default:
+#ifndef JSOP_PARSE_UNQUOTED_KEY
 			goto cleanup_on_error;
+#else
+			Buffer.clear();
+			if (ch < 0x80) {
+				if (jsop_code_point_is_id_start(ch)) {
+					if (Buffer.append(ch)) {
+						goto state_unquoted_key_id_continue;
+					}
+				}
+				goto cleanup_on_error;
+			} else {
+				ParsingIdContinue = false;
+				switch (ch) {
+				//2-byte utf-8 sequences
+				case 0xC2:
+				case 0xC3:
+				case 0xC4:
+				case 0xC5:
+				case 0xC6:
+				case 0xC7:
+				case 0xC8:
+				case 0xC9:
+				case 0xCA:
+				case 0xCB:
+				case 0xCC:
+				case 0xCD:
+				case 0xCE:
+				case 0xCF:
+				case 0xD0:
+				case 0xD1:
+				case 0xD2:
+				case 0xD3:
+				case 0xD4:
+				case 0xD5:
+				case 0xD6:
+				case 0xD7:
+				case 0xD8:
+				case 0xD9:
+				case 0xDA:
+				case 0xDB:
+				case 0xDC:
+				case 0xDD:
+				case 0xDE:
+				case 0xDF:
+					CurrentUtf32 = (ch - 0xC0) * 64;
+					JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_trail_1);
+
+				case 0xE0:
+					JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_0xE0);
+
+				case 0xE1:
+				case 0xE2:
+				case 0xE3:
+				case 0xE4:
+				case 0xE5:
+				case 0xE6:
+				case 0xE7:
+				case 0xE8:
+				case 0xE9:
+				case 0xEA:
+				case 0xEB:
+				case 0xEC:
+				case 0xEE:
+				case 0xEF:
+					CurrentUtf32 = (ch - 0xE0) * 4096;
+					JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_trail_2);
+
+				case 0xED:
+					JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_0xED);
+
+				case 0xF0:
+					JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_0xF0);
+
+				case 0xF1:
+				case 0xF2:
+				case 0xF3:
+					CurrentUtf32 = (ch - 0xF0) * 262144;
+					JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_trail_3);
+
+				case 0xF4:
+					JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_0xF4);
+
+				default:
+					goto cleanup_on_error;
+				}
+			}
+#endif
 		}
 	} else {
 		JSOP_PARSER_RETURN(KeyValues);
@@ -3560,6 +3690,280 @@ state_key_values_separator_or_close:
 	} else {
 		JSOP_PARSER_RETURN(KeyValuesSeparatorOrClose);
 	}
+
+#ifdef JSOP_PARSE_UNQUOTED_KEY
+state_unquoted_key_id_continue:
+	if (start != end) {
+		ch = *start;
+		++start, ++cur_column;
+		switch (ch) {
+		case '\0':
+			if (end == nullptr) {
+				JSOP_PARSER_RETURN(UnquotedKeyIdContinue);
+			} else {
+				goto cleanup_on_error;
+			}
+
+		case ':':
+			assert(!H::inTop());
+			if ((!H::requireNullTerminator() || Buffer.append('\0')) && H::makeString(Buffer.getStart(), Buffer.getEnd(), true)) {
+				goto state_values;
+			}
+			goto cleanup_on_error;
+
+		case '\n':
+			++cur_line;
+			cur_column = 1;
+		case ' ':
+		case '\t':
+		case '\r':
+			assert(!H::inTop());
+			if ((!H::requireNullTerminator() || Buffer.append('\0')) && H::makeString(Buffer.getStart(), Buffer.getEnd(), true)) {
+				goto state_key_separator;
+			}
+			goto cleanup_on_error;
+
+#ifdef JSOP_PARSE_COMMENT
+		case '/':
+			assert(!H::inTop());
+			if ((!H::requireNullTerminator() || Buffer.append('\0')) && H::makeString(Buffer.getStart(), Buffer.getEnd(), true)) {
+				LastState = KeySeparator;
+				goto state_single_or_multi_line_comment;
+			}
+			goto cleanup_on_error;
+#endif
+
+		default:
+			if (ch < 0x80) {
+				if (jsop_code_point_is_id_continue(ch)) {
+					if (Buffer.append(ch)) {
+						goto state_unquoted_key_id_continue;
+					}
+				}
+				goto cleanup_on_error;
+			} else {
+				ParsingIdContinue = true;
+				switch (ch) {
+				//2-byte utf-8 sequences
+				case 0xC2:
+				case 0xC3:
+				case 0xC4:
+				case 0xC5:
+				case 0xC6:
+				case 0xC7:
+				case 0xC8:
+				case 0xC9:
+				case 0xCA:
+				case 0xCB:
+				case 0xCC:
+				case 0xCD:
+				case 0xCE:
+				case 0xCF:
+				case 0xD0:
+				case 0xD1:
+				case 0xD2:
+				case 0xD3:
+				case 0xD4:
+				case 0xD5:
+				case 0xD6:
+				case 0xD7:
+				case 0xD8:
+				case 0xD9:
+				case 0xDA:
+				case 0xDB:
+				case 0xDC:
+				case 0xDD:
+				case 0xDE:
+				case 0xDF:
+					CurrentUtf32 = (ch - 0xC0) * 64;
+					JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_trail_1);
+
+				case 0xE0:
+					JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_0xE0);
+
+				case 0xE1:
+				case 0xE2:
+				case 0xE3:
+				case 0xE4:
+				case 0xE5:
+				case 0xE6:
+				case 0xE7:
+				case 0xE8:
+				case 0xE9:
+				case 0xEA:
+				case 0xEB:
+				case 0xEC:
+				case 0xEE:
+				case 0xEF:
+					CurrentUtf32 = (ch - 0xE0) * 4096;
+					JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_trail_2);
+
+				case 0xED:
+					JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_0xED);
+
+				case 0xF0:
+					JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_0xF0);
+
+				case 0xF1:
+				case 0xF2:
+				case 0xF3:
+					CurrentUtf32 = (ch - 0xF0) * 262144;
+					JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_trail_3);
+
+				case 0xF4:
+					JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_0xF4);
+
+				default:
+					goto cleanup_on_error;
+				}
+			}
+		}
+	} else {
+		JSOP_PARSER_RETURN(UnquotedKeyIdContinue);
+	}
+
+state_unquoted_key_utf8_0xF0:
+	if (start != end) {
+		ch = *start;
+		++start, ++cur_column;
+		if (ch >= 0x90 && ch <= 0xBF) {
+			CurrentUtf32 = (ch - 0x80) * 4096;
+			JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_trail_2);
+		} else if (ch == 0) {
+			if (end == nullptr) {
+				JSOP_PARSER_RETURN(UnquotedKeyUtf8_0xF0);
+			} else {
+				goto cleanup_on_error;
+			}
+		}
+		goto cleanup_on_error;
+	} else {
+		JSOP_PARSER_RETURN(UnquotedKeyUtf8_0xF0);
+	}
+
+state_unquoted_key_utf8_trail_3:
+	if (start != end) {
+		ch = *start;
+		++start, ++cur_column;
+		if (ch >= 0x80 && ch <= 0xBF) {
+			CurrentUtf32 += (ch - 0x80) * 4096;
+			JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_trail_2);
+		} else if (ch == 0) {
+			if (end == nullptr) {
+				JSOP_PARSER_RETURN(UnquotedKeyUtf8Trail3);
+			} else {
+				goto cleanup_on_error;
+			}
+		}
+		goto cleanup_on_error;
+	} else {
+		JSOP_PARSER_RETURN(UnquotedKeyUtf8Trail3);
+	}
+
+state_unquoted_key_utf8_0xF4:
+	if (start != end) {
+		ch = *start;
+		++start, ++cur_column;
+		if (ch >= 0x80 && ch <= 0x8F) {
+			CurrentUtf32 = 4 * 262144 + (ch - 0x80) * 4096;
+			JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_trail_2);
+		} else if (ch == 0) {
+			if (end == nullptr) {
+				JSOP_PARSER_RETURN(UnquotedKeyUtf8_0xF4);
+			} else {
+				goto cleanup_on_error;
+			}
+		}
+		goto cleanup_on_error;
+	} else {
+		JSOP_PARSER_RETURN(UnquotedKeyUtf8_0xF4);
+	}
+
+state_unquoted_key_utf8_0xE0:
+	if (start != end) {
+		ch = *start;
+		++start, ++cur_column;
+		if (ch >= 0xA0 && ch <= 0xBF) {
+			CurrentUtf32 = (ch - 0x80) * 64;
+			JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_trail_1);
+		} else if (ch == 0) {
+			if (end == nullptr) {
+				JSOP_PARSER_RETURN(UnquotedKeyUtf8_0xE0);
+			} else {
+				goto cleanup_on_error;
+			}
+		}
+		goto cleanup_on_error;
+	} else {
+		JSOP_PARSER_RETURN(UnquotedKeyUtf8_0xE0);
+	}
+
+state_unquoted_key_utf8_trail_2:
+	if (start != end) {
+		ch = *start;
+		++start, ++cur_column;
+		if (ch >= 0x80 && ch <= 0xBF) {
+			CurrentUtf32 += (ch - 0x80) * 64;
+			JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_trail_1);
+		} else if (ch == 0) {
+			if (end == nullptr) {
+				JSOP_PARSER_RETURN(UnquotedKeyUtf8Trail2);
+			} else {
+				goto cleanup_on_error;
+			}
+		}
+		goto cleanup_on_error;
+	} else {
+		JSOP_PARSER_RETURN(UnquotedKeyUtf8Trail2);
+	}
+
+state_unquoted_key_utf8_0xED:
+	if (start != end) {
+		ch = *start;
+		++start, ++cur_column;
+		if (ch >= 0x80 && ch <= 0x9F) {
+			CurrentUtf32 = 0xD * 4096 + (ch - 0x80) * 64;
+			JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_trail_1);
+		} else if (ch == 0) {
+			if (end == nullptr) {
+				JSOP_PARSER_RETURN(UnquotedKeyUtf8_0xED);
+			} else {
+				goto cleanup_on_error;
+			}
+		}
+		goto cleanup_on_error;
+	} else {
+		JSOP_PARSER_RETURN(UnquotedKeyUtf8_0xED);
+	}
+
+state_unquoted_key_utf8_trail_1:
+	if (start != end) {
+		ch = *start;
+		++start, ++cur_column;
+		if (ch >= 0x80 && ch <= 0xBF) {
+			CurrentUtf32 += ch - 0x80;
+			if (ParsingIdContinue) {
+				if (!jsop_code_point_is_id_continue(CurrentUtf32)) {
+					goto cleanup_on_error;
+				}
+			} else {
+				if (!jsop_code_point_is_id_start(CurrentUtf32)) {
+					goto cleanup_on_error;
+				}
+			}
+			JSOP_PARSER_APPEND_CHAR(state_unquoted_key_id_continue);
+		} else if (ch == 0) {
+			if (end == nullptr) {
+				JSOP_PARSER_RETURN(UnquotedKeyUtf8Trail1);
+			} else {
+				goto cleanup_on_error;
+			}
+		}
+		goto cleanup_on_error;
+	} else {
+		JSOP_PARSER_RETURN(UnquotedKeyUtf8Trail1);
+	}
+#endif
 
 #ifdef JSOP_PARSE_COMMENT
 state_single_or_multi_line_comment:
