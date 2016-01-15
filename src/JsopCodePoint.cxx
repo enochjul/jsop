@@ -3826,7 +3826,7 @@ const uint8_t JsopCodePointIDSBitsetIds[] = {
 	64,
 };
 
-bool jsop_code_point_is_id_continue(uint32_t codepoint) {
+bool jsop_code_point_is_id_continue(uint32_t codepoint) noexcept {
 	unsigned id, offset;
 
 	if (codepoint < JSOP_CODE_POINT_IDC_BITSET_SIZE) {
@@ -3838,7 +3838,7 @@ bool jsop_code_point_is_id_continue(uint32_t codepoint) {
 	}
 }
 
-bool jsop_code_point_is_id_start(uint32_t codepoint) {
+bool jsop_code_point_is_id_start(uint32_t codepoint) noexcept {
 	unsigned id, offset;
 
 	if (codepoint < JSOP_CODE_POINT_IDS_BITSET_SIZE) {

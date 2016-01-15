@@ -8,8 +8,8 @@
 #include <stdint.h>
 
 //! Checks if the given code point is allowed as a part of an identifier
-bool jsop_code_point_is_id_continue(uint32_t codepoint);
+bool jsop_code_point_is_id_continue(uint32_t codepoint) noexcept;
 //! Checks if the given code point is allowed as the first character of an identifier
-bool jsop_code_point_is_id_start(uint32_t codepoint);
+bool jsop_code_point_is_id_start(uint32_t codepoint) noexcept;
 
 #endif
