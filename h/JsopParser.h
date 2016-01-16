@@ -2418,6 +2418,9 @@ state_string_escaped_char:
 				goto cleanup_on_error;
 			}
 
+#ifdef JSOP_PARSE_SINGLE_QUOTE_ESCAPE
+		case '\'':
+#endif
 		case '"':
 		case '\\':
 		case '/':
@@ -2448,6 +2451,12 @@ state_string_escaped_char:
 			ParsingUnquotedKeyEscape = false;
 #endif
 			goto state_string_escaped_utf16_hex_1;
+
+#ifdef JSOP_PARSE_VERTICAL_TAB_ESCAPE
+		case 'v':
+			ch = '\v';
+			break;
+#endif
 
 		default:
 			goto cleanup_on_error;
