@@ -11,7 +11,7 @@ endif(NOT CMAKE_BUILD_TYPE)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fvisibility=hidden -fno-exceptions -fno-rtti")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wstrict-aliasing -Wreturn-type -Wuninitialized -Wunused-variable -Wunused-but-set-variable -Wformat")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__STDC_LIMIT_MACROS")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__STDC_LIMIT_MACROS -D__STDC_CONSTANT_MACROS")
 
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address")
 set(CMAKE_CXX_FLAGS_RELEASE "-O2 -march=native -DNDEBUG")

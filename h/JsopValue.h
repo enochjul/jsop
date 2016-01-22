@@ -394,7 +394,7 @@ public:
 	}
 
 	//! Converts the value into a 64-bit signed integer
-	int64_t toSignedInteger() const noexcept {
+	int64_t toInt64() const noexcept {
 		switch (Type) {
 #if JSOP_WORD_SIZE == 64
 		case BoolType:
@@ -428,7 +428,7 @@ public:
 	}
 
 	//! Converts the value into a 64-bit unsigned integer
-	uint64_t toUnsigned() const noexcept {
+	uint64_t toUint64() const noexcept {
 		switch (Type) {
 #if JSOP_WORD_SIZE == 64
 		case BoolType:

@@ -2,7 +2,7 @@
 //License, v. 2.0. If a copy of the MPL was not distributed with this
 //file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-#include "../h/JsopCodePoint.h"
+#include "JsopCodePoint.h"
 
 #define JSOP_CODE_POINT_WORD_BITS 5
 #define JSOP_CODE_POINT_OFFSET_BITS 4

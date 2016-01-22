@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 
-#include "../h/JsopMemoryPools.h"
+#include "JsopMemoryPools.h"
 #include "JsopDefines.h"
 
 void JsopMemoryPools::destroy(Pool *pool) noexcept {

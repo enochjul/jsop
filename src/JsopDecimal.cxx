@@ -11,6 +11,12 @@
 #include <stddef.h>
 
 #ifndef JSOP_USE_CLZ
+	#if !defined(__i386__) && !defined(__amd64__)
+		#define JSOP_USE_CLZ
+	#endif
+#endif
+
+#ifndef JSOP_USE_CLZ
 #include <x86intrin.h>
 #endif
 
