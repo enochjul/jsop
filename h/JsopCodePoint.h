@@ -5,11 +5,31 @@
 #ifndef JSOP_CODE_POINT_H
 #define JSOP_CODE_POINT_H
 
+#include <assert.h>
 #include <stdint.h>
+
+#include "JsopDefines.h"
+
+#define JSOP_CODE_POINT_IDC_ASCII_BITSET_MASK 0x1
+#define JSOP_CODE_POINT_IDS_ASCII_BITSET_MASK 0x2
+
+extern const uint8_t JsopCodePointASCIIBitset[];
 
 //! Checks if the given code point is allowed as a part of an identifier
 bool jsop_code_point_is_id_continue(uint32_t codepoint) noexcept;
 //! Checks if the given code point is allowed as the first character of an identifier
 bool jsop_code_point_is_id_start(uint32_t codepoint) noexcept;
+
+//! Checks if the given 7-bit ASCII code point is allowed as a part of an identifier
+JSOP_INLINE bool jsop_code_point_ascii_is_id_continue(unsigned char codepoint) noexcept {
+	assert(codepoint >= 0 && codepoint < 128);
+	return JsopCodePointASCIIBitset[codepoint] & JSOP_CODE_POINT_IDC_ASCII_BITSET_MASK;
+}
+
+//! Checks if the given 7-bit ASCII code point is allowed as the first character of an identifier
+JSOP_INLINE bool jsop_code_point_ascii_is_id_start(unsigned char codepoint) noexcept {
+	assert(codepoint >= 0 && codepoint < 128);
+	return JsopCodePointASCIIBitset[codepoint] & JSOP_CODE_POINT_IDS_ASCII_BITSET_MASK;
+}
 
 #endif
