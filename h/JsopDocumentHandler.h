@@ -65,7 +65,7 @@ public:
 	bool finish(JsopDocument *doc) noexcept;
 	//! Frees memory allocated for the parsed values
 	//! Does not clear the stack as it can be used for subsequent parses
-	void cleanup()  noexcept {
+	void cleanup() noexcept {
 		Pools.clear();
 	}
 
@@ -176,7 +176,7 @@ public:
 	//! Finish parsing of an array and return to the previous context
 	bool popArray() noexcept;
 
-	//! Makes a new array, and push the context to add subsequent (key, value) pairs to the array
+	//! Makes a new object, and push the context to add subsequent (key, value) pairs to the object
 	JSOP_INLINE bool pushObject() noexcept {
 		auto new_value = makeValue();
 		if (new_value != nullptr) {

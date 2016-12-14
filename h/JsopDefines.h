@@ -48,5 +48,6 @@
 #endif
 
 #define JSOP_LIKELY(x) __builtin_expect((x), true)
+#define JSOP_UNLIKELY(x) __builtin_expect((x), false)
 
 #endif

@@ -28,6 +28,7 @@ JsopValue *JsopDocumentHandler::resizeStack() noexcept {
 
 bool JsopDocumentHandler::start() noexcept {
 	if (StackStart == nullptr) {
+		static_assert(JSOP_VALUE_STACK_MIN_SIZE % sizeof(JsopValue) == 0, "JSOP_VALUE_STACK_MIN_SIZE % sizeof(JsopValue) == 0");
 		StackStart = static_cast<JsopValue *>(malloc(JSOP_VALUE_STACK_MIN_SIZE));
 		if (StackStart == nullptr) {
 			return false;

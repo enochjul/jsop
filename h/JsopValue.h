@@ -19,13 +19,16 @@ struct JsopKeyValue;
 
 //! Represents a view to a string that does not include a terminating null character
 class JsopStringView final {
-	const char *Start;
-	const char *Finish;
-
 public:
 	typedef size_t size_type;
-	typedef const char *const_iterator;
+	typedef char value_type;
+	typedef const value_type *const_iterator;
 
+private:
+	const value_type *Start;
+	const value_type *Finish;
+
+public:
 	constexpr JsopStringView(const char *start, const char *finish) noexcept : Start(start), Finish(finish) {
 	}
 
@@ -41,7 +44,7 @@ public:
 		return Finish;
 	}
 
-	const char &operator [](size_type i) const noexcept {
+	const value_type &operator [](size_type i) const noexcept {
 		assert(i < size());
 		return Start[i];
 	}
@@ -49,14 +52,17 @@ public:
 
 //! Represents a view to an array
 class JsopArrayView final {
-	const JsopValue *Start;
-	const JsopValue *Finish;
-
 public:
 	typedef size_t size_type;
-	typedef const JsopValue *const_iterator;
+	typedef JsopValue value_type;
+	typedef const value_type *const_iterator;
 
-	constexpr JsopArrayView(const JsopValue *start, const JsopValue *finish) noexcept : Start(start), Finish(finish) {
+private:
+	const value_type *Start;
+	const value_type *Finish;
+
+public:
+	constexpr JsopArrayView(const value_type *start, const value_type *finish) noexcept : Start(start), Finish(finish) {
 	}
 
 	JSOP_INLINE size_type size() const noexcept;
@@ -69,31 +75,34 @@ public:
 		return Finish;
 	}
 
-	JSOP_INLINE const JsopValue &operator [](size_type i) const noexcept;
+	JSOP_INLINE const value_type &operator [](size_type i) const noexcept;
 };
 
 class JsopObjectView final {
-	const JsopKeyValue *Start;
-	const JsopKeyValue *Finish;
-
 public:
 	typedef size_t size_type;
-	typedef const JsopKeyValue *const_iterator;
+	typedef JsopKeyValue value_type;
+	typedef const value_type *const_iterator;
 
-	constexpr JsopObjectView(const JsopKeyValue *start, const JsopKeyValue *finish) noexcept : Start(start), Finish(finish) {
+private:
+	const value_type *Start;
+	const value_type *Finish;
+
+public:
+	constexpr JsopObjectView(const value_type *start, const value_type *finish) noexcept : Start(start), Finish(finish) {
 	}
 
 	JSOP_INLINE size_type size() const noexcept;
 
-	const JsopKeyValue *begin() const noexcept {
+	const_iterator begin() const noexcept {
 		return Start;
 	}
 
-	const JsopKeyValue *end() const noexcept {
+	const_iterator end() const noexcept {
 		return Finish;
 	}
 
-	JSOP_INLINE const JsopKeyValue &operator [](size_type i) const noexcept;
+	JSOP_INLINE const value_type &operator [](size_type i) const noexcept;
 };
 
 //! Represents a value using a type field and a union of all possible values
@@ -112,9 +121,9 @@ public:
 		ArrayType,
 		ObjectType,
 		//These types are only used internally during parsing or testing
-		PartialObjectType,
 		PartialArrayType,
-		MaxType = PartialArrayType
+		PartialObjectType,
+		MaxType = PartialObjectType
 	};
 	static_assert(MaxType < (1 << 4), "MaxType < (1 << 4)");
 
