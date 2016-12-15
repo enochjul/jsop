@@ -22,4 +22,4 @@ Sample usage for parsing a null-terminated string:
 
 If the string is not null-terminated, then pass a second argument that points to the end of the string. You can also call parse() multiple times if you are reading a large file into a fixed sized buffer.
 
-Compiled on 64-bit Linux with gcc 5.1.1
+Compiled on 64-bit Linux with gcc 6.2.1
