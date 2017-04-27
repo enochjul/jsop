@@ -11,9 +11,10 @@
 #include <string.h>
 
 #include <limits>
+#include <utility>
 
-#include "JsopPackedValue.h"
 #include "JsopDefines.h"
+#include "JsopPackedValue.h"
 
 template <class IO>
 class JsopPackedDocumentHandler : public IO {
@@ -138,19 +139,20 @@ public:
 	bool makeInteger(uint64_t value, bool negative) noexcept;
 
 	bool makeDouble(value_type *new_value, double value) noexcept {
-		union {
-			uint64_t Uint64Value;
-			double DoubleValue;
-		} u;
-		u.DoubleValue = value;
-		auto e = (u.Uint64Value >> (DBL_MANT_DIG - 1)) & ((1 << (sizeof(double) * CHAR_BIT - DBL_MANT_DIG)) - 1);
-		if (e >= ((2 - DBL_MIN_EXP) - 63) && e <= ((2 - DBL_MIN_EXP) + 127 - 63)) {
-			new_value->setPackedDouble(value);
-			return true;
-		} else {
-			*new_value = IO::writeDouble(value);
-			return !(new_value->isNull());
+		if (sizeof(size_type) >= sizeof(double)) {
+			union {
+				uint64_t Uint64Value;
+				double DoubleValue;
+			} u;
+			u.DoubleValue = value;
+			auto e = (u.Uint64Value >> (DBL_MANT_DIG - 1)) & ((1 << (sizeof(double) * CHAR_BIT - DBL_MANT_DIG)) - 1);
+			if (e >= ((2 - DBL_MIN_EXP) - value_type::PACKED_DOUBLE_EXPONENT_BIAS) && e <= ((2 - DBL_MIN_EXP) + (value_type::PACKED_DOUBLE_EXPONENT_BIAS + 1))) {
+				new_value->setPackedDouble(value);
+				return true;
+			}
 		}
+		*new_value = IO::writeDouble(value);
+		return !(new_value->isNull());
 	}
 
 	bool makeDouble(double value) noexcept {

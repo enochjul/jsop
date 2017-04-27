@@ -5,7 +5,9 @@
 #ifndef JSOP_PACKED_FILE_H
 #define JSOP_PACKED_FILE_H
 
+#include <limits.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 #include <limits>
@@ -14,6 +16,8 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include "JsopPackedValue.h"
 
 template <
 	class ValueType,

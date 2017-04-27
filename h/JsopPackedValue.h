@@ -198,12 +198,12 @@ public:
 	static_assert(sizeof(String) == sizeof(SizeType), "sizeof(String) == sizeof(SizeType)");
 	static_assert(MinimumAlignment > 0 && (MinimumAlignment & (MinimumAlignment - 1)) == 0, "MinimumAlignment > 0 && (MinimumAlignment & (MinimumAligment - 1)) == 0");
 
-private:
 	enum : size_t {
-		PACKED_DOUBLE_EXPONENT_BITS = sizeof(size_type) * CHAR_BIT - DBL_MANT_DIG - VALUE_TYPE_NUMBER_OF_BITS,
+		PACKED_DOUBLE_EXPONENT_BITS = sizeof(size_type) >= sizeof(double) ? sizeof(size_type) * CHAR_BIT - DBL_MANT_DIG - VALUE_TYPE_NUMBER_OF_BITS : 1,
 		PACKED_DOUBLE_EXPONENT_BIAS = (1 << (PACKED_DOUBLE_EXPONENT_BITS - 1)) - 1,
 	};
 
+private:
 	enum : uint64_t {
 		DOUBLE_MANTISSA_MASK = (static_cast<uint64_t>(1) << (DBL_MANT_DIG - 1)) - 1,
 		DOUBLE_EXPONENT_MASK = ((static_cast<uint64_t>(1) << (sizeof(double) * CHAR_BIT - DBL_MANT_DIG)) - 1) << (DBL_MANT_DIG - 1),
