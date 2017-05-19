@@ -48,6 +48,10 @@ public:
 		assert(i < size());
 		return Start[i];
 	}
+
+	const value_type *data() const noexcept {
+		return Start;
+	}
 };
 
 //! Represents a view to an array
@@ -76,6 +80,10 @@ public:
 	}
 
 	JSOP_INLINE const value_type &operator [](size_type i) const noexcept;
+
+	const value_type *data() const noexcept {
+		return Start;
+	}
 };
 
 class JsopObjectView final {
@@ -103,6 +111,10 @@ public:
 	}
 
 	JSOP_INLINE const value_type &operator [](size_type i) const noexcept;
+
+	const value_type *data() const noexcept {
+		return Start;
+	}
 };
 
 //! Represents a value using a type field and a union of all possible values
