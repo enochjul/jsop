@@ -32,4 +32,10 @@ JSOP_INLINE bool jsop_code_point_ascii_is_id_start(unsigned char codepoint) noex
 	return JsopCodePointASCIIBitset[codepoint] & JSOP_CODE_POINT_IDS_ASCII_BITSET_MASK;
 }
 
+//! Checks if the given char is a single ASCII char that is copied directly to the output when used in a string
+JSOP_INLINE bool jsop_code_point_is_normal_ascii_string_char(unsigned char codepoint) noexcept {
+	//Since the ASCII IDC and IDS sets are a strict subset of this, just load and test the value without masking
+	return JsopCodePointASCIIBitset[codepoint];
+}
+
 #endif

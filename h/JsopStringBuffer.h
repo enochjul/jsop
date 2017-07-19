@@ -51,15 +51,89 @@ public:
 		return End;
 	}
 
+	char *getEnd() noexcept {
+		return End;
+	}
+
+	void setEnd(char *ptr) noexcept {
+		assert(ptr >= Start && ptr < AllocEnd);
+		End = ptr;
+	}
+
 	//! Appends the given character to the string
 	JSOP_INLINE bool append(char ch) noexcept {
-		if (End == AllocEnd) {
+		auto end = End;
+		if (JSOP_UNLIKELY(end == AllocEnd)) {
+			if (resize() == nullptr) {
+				return false;
+			}
+			end = End;
+		}
+		*end = ch;
+		End = end + 1;
+		return true;
+	}
+
+	//! Appends the given 2 characters to the string
+	JSOP_INLINE bool append(char ch0, char ch1) noexcept {
+		auto end = End;
+		size_t remaining_capacity = AllocEnd - end;
+		if (JSOP_UNLIKELY(remaining_capacity < 2)) {
+			if (resize() == nullptr) {
+				return false;
+			}
+			end = End;
+		}
+		*end = ch0;
+		*(end + 1) = ch1;
+		End = end + 2;
+		return true;
+	}
+
+	//! Appends the given 3 characters to the string
+	JSOP_INLINE bool append(char ch0, char ch1, char ch2) noexcept {
+		auto end = End;
+		size_t remaining_capacity = AllocEnd - end;
+		if (JSOP_UNLIKELY(remaining_capacity < 3)) {
+			if (resize() == nullptr) {
+				return false;
+			}
+			end = End;
+		}
+		*end = ch0;
+		*(end + 1) = ch1;
+		*(end + 2) = ch2;
+		End = end + 3;
+		return true;
+	}
+
+	//! Appends the given 3 characters to the string
+	JSOP_INLINE bool append(char ch0, char ch1, char ch2, char ch3) noexcept {
+		auto end = End;
+		size_t remaining_capacity = AllocEnd - End;
+		if (JSOP_UNLIKELY(remaining_capacity < 4)) {
+			if (resize() == nullptr) {
+				return false;
+			}
+			end = End;
+		}
+		*end = ch0;
+		*(end + 1) = ch1;
+		*(end + 2) = ch2;
+		*(end + 3) = ch3;
+		End = end + 4;
+		return true;
+	}
+
+	//! Resize the buffer if the remaining capacity in the buffer is less than the given size
+	JSOP_INLINE bool resize_if(size_t n) noexcept {
+		assert(static_cast<size_t>(AllocEnd - Start) >= n);
+		size_t remaining_capacity = AllocEnd - End;
+		if (JSOP_UNLIKELY(remaining_capacity < n)) {
 			if (resize() == nullptr) {
 				return false;
 			}
 		}
-		*End = ch;
-		++End;
 		return true;
 	}
 

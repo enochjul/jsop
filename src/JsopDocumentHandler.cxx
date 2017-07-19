@@ -151,13 +151,14 @@ bool JsopDocumentHandler::popArray() noexcept {
 
 	assert((StackEnd - StackStart) > 0 && (StackEnd - StackStart) >= PrevStackSize && PrevStackSize > 0);
 
-	if (StackStart[PrevStackSize - 1].getType() == JsopValue::PartialArrayType) {
-		n = static_cast<size_t>(StackEnd - StackStart) - PrevStackSize;
+	auto values_start = StackStart + PrevStackSize;
+	if (JSOP_LIKELY(values_start[-1].getType() == JsopValue::PartialArrayType)) {
+		n = static_cast<size_t>(StackEnd - values_start);
 		if (n <= JsopValue::MAX_SIZE) {
-			auto values_start = StackStart + PrevStackSize;
 			new_values = nullptr;
-			if (n > 0) {
-				if (values_start[-1].getStackSize() > 0) {
+			auto stack_size = values_start[-1].getStackSize();
+			if (JSOP_LIKELY(n > 0)) {
+				if (JSOP_LIKELY(stack_size > 0)) {
 					new_values = Pools.alloc<JsopValue>(n);
 					if (new_values != nullptr) {
 						memcpy(new_values, values_start, sizeof(JsopValue) * n);
@@ -169,7 +170,7 @@ bool JsopDocumentHandler::popArray() noexcept {
 					new_values = values_start;
 				}
 			}
-			PrevStackSize = values_start[-1].getStackSize();
+			PrevStackSize = stack_size;
 			values_start[-1].setArray(new_values, n);
 			return true;
 		}
@@ -183,15 +184,17 @@ bool JsopDocumentHandler::popObject() noexcept {
 
 	assert((StackEnd - StackStart) > 0 && (StackEnd - StackStart) >= PrevStackSize && PrevStackSize > 0);
 
-	if (StackStart[PrevStackSize - 1].getType() == JsopValue::PartialObjectType) {
-		n = static_cast<size_t>(StackEnd - StackStart) - PrevStackSize;
+	auto values_start = StackStart + PrevStackSize;
+	if (JSOP_LIKELY(values_start[-1].getType() == JsopValue::PartialObjectType)) {
+		n = static_cast<size_t>(StackEnd - values_start);
 		assert((n % 2) == 0);
 		new_object_size = n / 2;
 		if (new_object_size <= JsopValue::MAX_SIZE) {
 			auto values_start = StackStart + PrevStackSize;
 			new_values = nullptr;
-			if (n > 0) {
-				if (values_start[-1].getStackSize() > 0) {
+			auto stack_size = values_start[-1].getStackSize();
+			if (JSOP_LIKELY(n > 0)) {
+				if (JSOP_LIKELY(stack_size > 0)) {
 					new_values = Pools.alloc<JsopValue>(n);
 					if (new_values != nullptr) {
 						memcpy(new_values, values_start, sizeof(JsopValue) * n);
@@ -203,7 +206,7 @@ bool JsopDocumentHandler::popObject() noexcept {
 					new_values = values_start;
 				}
 			}
-			PrevStackSize = values_start[-1].getStackSize();
+			PrevStackSize = stack_size;
 			values_start[-1].setObject(new_values, new_object_size);
 			return true;
 		}

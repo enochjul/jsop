@@ -16,6 +16,7 @@
 #ifndef JSOP_STRING_BUFFER_MIN_SIZE
 #define JSOP_STRING_BUFFER_MIN_SIZE 4096
 #endif
+#define JSOP_STRING_MULTI_BYTE_COPY
 
 #ifndef JSOP_VALUE_STACK_MIN_SIZE
 #define JSOP_VALUE_STACK_MIN_SIZE 262144
@@ -47,7 +48,7 @@
 #define JSOP_INLINE __attribute__((always_inline)) inline
 #endif
 
-#define JSOP_LIKELY(x) __builtin_expect((x), true)
-#define JSOP_UNLIKELY(x) __builtin_expect((x), false)
+#define JSOP_LIKELY(x) __builtin_expect(static_cast<bool>(x), true)
+#define JSOP_UNLIKELY(x) __builtin_expect(static_cast<bool>(x), false)
 
 #endif
