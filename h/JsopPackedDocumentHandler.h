@@ -183,7 +183,23 @@ public:
 	}
 
 	//! Finish parsing of an array and return to the previous context
-	bool popArray() noexcept;
+	bool popArray() noexcept {
+		assert((StackEnd - StackStart) >= PrevStackSize && PrevStackSize > 0);
+
+		auto values_start = StackStart + PrevStackSize;
+		if (JSOP_LIKELY(values_start[-1].isPartialArray())) {
+			size_t n = static_cast<size_t>(StackEnd - values_start);
+			auto new_value = IO::writeArray(n, values_start);
+			if (!(new_value.isNull())) {
+				StackEnd = values_start;
+
+				PrevStackSize = values_start[-1].getOffset();
+				values_start[-1] = new_value;
+				return true;
+			}
+		}
+		return false;
+	}
 
 	//! Makes a new object, and push the context to add subsequent (key, value) pairs to the object
 	bool pushObject() noexcept {
@@ -199,7 +215,25 @@ public:
 	}
 
 	//! Finish parsing of an object and return to the previous context
-	bool popObject() noexcept;
+	bool popObject() noexcept {
+		assert((StackEnd - StackStart) >= PrevStackSize && PrevStackSize > 0);
+
+		auto values_start = StackStart + PrevStackSize;
+		if (JSOP_LIKELY(values_start[-1].isPartialObject())) {
+			size_t n = static_cast<size_t>(StackEnd - values_start);
+			assert((n % 2) == 0);
+			size_t new_object_size = n / 2;
+			auto new_value = IO::writeObject(new_object_size, values_start);
+			if (!(new_value.isNull())) {
+				StackEnd = values_start;
+
+				PrevStackSize = values_start[-1].getOffset();
+				values_start[-1] = new_value;
+				return true;
+			}
+		}
+		return false;
+	}
 };
 
 template <class IO>
@@ -249,7 +283,6 @@ bool JsopPackedDocumentHandler<IO>::makeInteger(uint64_t value, bool negative) n
 				return makeDouble(new_value, -static_cast<double>(value));
 			}
 		}
-		new_value->setNull();
 	}
 	return false;
 }
@@ -259,56 +292,17 @@ bool JsopPackedDocumentHandler<IO>::makeString(const char *start, const char *en
 	auto new_value = makeValue();
 	if (new_value != nullptr) {
 		size_t n = static_cast<size_t>(end - start);
-		if (n <= (sizeof(size_type) - sizeof(typename TinyString::size_type) - sizeof(char)) / sizeof(char)) {
-			*new_value = value_type::makeTinyString(n, start);
-			return true;
-		} else if (n <= std::numeric_limits<typename SmallString::size_type>::max()) {
-			*new_value = IO::writeSmallString(n, start);
-			return !(new_value->isNull());
+		if (JSOP_LIKELY(n <= std::numeric_limits<typename SmallString::size_type>::max())) {
+			if (JSOP_LIKELY(n > (sizeof(size_type) - sizeof(typename TinyString::size_type) - sizeof(char)) / sizeof(char))) {
+				*new_value = IO::writeSmallString(n, start);
+				return !(new_value->isNull());
+			} else {
+				*new_value = value_type::makeTinyString(n, start);
+				return true;
+			}
 		} else {
 			*new_value = IO::writeString(n, start);
 			return !(new_value->isNull());
-		}
-		new_value->setNull();
-	}
-	return false;
-}
-
-template <class IO>
-bool JsopPackedDocumentHandler<IO>::popArray() noexcept {
-	assert((StackEnd - StackStart) >= PrevStackSize && PrevStackSize > 0);
-
-	auto values_start = StackStart + PrevStackSize;
-	if (values_start[-1].isPartialArray()) {
-		size_t n = static_cast<size_t>(StackEnd - values_start);
-		auto new_value = IO::writeArray(n, values_start);
-		if (!(new_value.isNull())) {
-			StackEnd = values_start;
-
-			PrevStackSize = values_start[-1].getOffset();
-			values_start[-1] = new_value;
-			return true;
-		}
-	}
-	return false;
-}
-
-template <class IO>
-bool JsopPackedDocumentHandler<IO>::popObject() noexcept {
-	assert((StackEnd - StackStart) >= PrevStackSize && PrevStackSize > 0);
-
-	auto values_start = StackStart + PrevStackSize;
-	if (values_start[-1].isPartialObject()) {
-		size_t n = static_cast<size_t>(StackEnd - values_start);
-		assert((n % 2) == 0);
-		size_t new_object_size = n / 2;
-		auto new_value = IO::writeObject(new_object_size, values_start);
-		if (!(new_value.isNull())) {
-			StackEnd = values_start;
-
-			PrevStackSize = values_start[-1].getOffset();
-			values_start[-1] = new_value;
-			return true;
 		}
 	}
 	return false;

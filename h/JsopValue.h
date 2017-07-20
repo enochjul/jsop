@@ -132,10 +132,7 @@ public:
 		StringType,
 		ArrayType,
 		ObjectType,
-		//These types are only used internally during parsing or testing
-		PartialArrayType,
-		PartialObjectType,
-		MaxType = PartialObjectType
+		MaxType = ObjectType
 	};
 	static_assert(MaxType < (1 << 4), "MaxType < (1 << 4)");
 
@@ -302,7 +299,7 @@ public:
 	JSOP_INLINE size_type size() const noexcept;
 
 	size_t getStackSize() const noexcept {
-		assert(Type == PartialArrayType || Type == PartialObjectType);
+		assert(Type == ArrayType || Type == ObjectType);
 		return StackSize;
 	}
 
@@ -403,13 +400,13 @@ public:
 #endif
 
 	void setPartialObject(size_t value) noexcept {
-		Type = PartialObjectType;
+		Type = ObjectType;
 		Size = 0;
 		StackSize = value;
 	}
 
 	void setPartialArray(size_t value) noexcept {
-		Type = PartialArrayType;
+		Type = ArrayType;
 		Size = 0;
 		StackSize = value;
 	}

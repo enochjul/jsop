@@ -77,13 +77,13 @@ public:
 	//! Checks if it is parsing a value inside an array
 	bool inArray() const noexcept {
 		assert(PrevStackSize > 0);
-		return StackStart[PrevStackSize - 1].getType() == JsopValue::PartialArrayType;
+		return StackStart[PrevStackSize - 1].getType() == JsopValue::ArrayType;
 	}
 
 	//! Checks if it is parsing a value inside an object
 	bool inObject() const noexcept {
 		assert(PrevStackSize > 0);
-		return StackStart[PrevStackSize - 1].getType() == JsopValue::PartialObjectType;
+		return StackStart[PrevStackSize - 1].getType() == JsopValue::ObjectType;
 	}
 
 	JSOP_INLINE bool makeNull() noexcept {
@@ -174,7 +174,38 @@ public:
 	}
 
 	//! Finish parsing of an array and return to the previous context
-	bool popArray() noexcept;
+	bool popArray() noexcept {
+		JsopValue *new_values;
+		size_t n;
+
+		assert((StackEnd - StackStart) > 0 && (StackEnd - StackStart) >= PrevStackSize && PrevStackSize > 0);
+
+		auto values_start = StackStart + PrevStackSize;
+		if (JSOP_LIKELY(values_start[-1].getType() == JsopValue::ArrayType)) {
+			n = static_cast<size_t>(StackEnd - values_start);
+			if (n <= JsopValue::MAX_SIZE) {
+				new_values = nullptr;
+				auto stack_size = values_start[-1].getStackSize();
+				if (JSOP_LIKELY(n > 0)) {
+					if (JSOP_LIKELY(stack_size > 0)) {
+						new_values = Pools.alloc<JsopValue>(n);
+						if (new_values != nullptr) {
+							memcpy(new_values, values_start, sizeof(JsopValue) * n);
+						} else {
+							return false;
+						}
+						StackEnd = values_start;
+					} else {
+						new_values = values_start;
+					}
+				}
+				PrevStackSize = stack_size;
+				values_start[-1].setArray(new_values, n);
+				return true;
+			}
+		}
+		return false;
+	}
 
 	//! Makes a new object, and push the context to add subsequent (key, value) pairs to the object
 	JSOP_INLINE bool pushObject() noexcept {
@@ -188,7 +219,41 @@ public:
 	}
 
 	//! Finish parsing of an object and return to the previous context
-	bool popObject() noexcept;
+	bool popObject() noexcept {
+		JsopValue *new_values;
+		size_t n, new_object_size;
+
+		assert((StackEnd - StackStart) > 0 && (StackEnd - StackStart) >= PrevStackSize && PrevStackSize > 0);
+
+		auto values_start = StackStart + PrevStackSize;
+		if (JSOP_LIKELY(values_start[-1].getType() == JsopValue::ObjectType)) {
+			n = static_cast<size_t>(StackEnd - values_start);
+			assert((n % 2) == 0);
+			new_object_size = n / 2;
+			if (new_object_size <= JsopValue::MAX_SIZE) {
+				auto values_start = StackStart + PrevStackSize;
+				new_values = nullptr;
+				auto stack_size = values_start[-1].getStackSize();
+				if (JSOP_LIKELY(n > 0)) {
+					if (JSOP_LIKELY(stack_size > 0)) {
+						new_values = Pools.alloc<JsopValue>(n);
+						if (new_values != nullptr) {
+							memcpy(new_values, values_start, sizeof(JsopValue) * n);
+						} else {
+							return false;
+						}
+						StackEnd = values_start;
+					} else {
+						new_values = values_start;
+					}
+				}
+				PrevStackSize = stack_size;
+				values_start[-1].setObject(new_values, new_object_size);
+				return true;
+			}
+		}
+		return false;
+	}
 };
 
 #endif

@@ -128,7 +128,7 @@ bool JsopDocumentHandler::makeString(const char *start, const char *end) noexcep
 			//Small strings are store within the value itself
 			new_value->setSmallString(n, start);
 			return true;
-		} else if (n <= JsopValue::MAX_SIZE) {
+		} else if (JSOP_LIKELY(n <= JsopValue::MAX_SIZE)) {
 			//Allocate the string and store a pointer to the allocated value
 			new_string = Pools.alloc<char>(n + 1);
 			if (new_string != nullptr) {
@@ -141,75 +141,6 @@ bool JsopDocumentHandler::makeString(const char *start, const char *end) noexcep
 		}
 		//Either the length is too large or it cannot allocate the memory
 		new_value->setNull();
-	}
-	return false;
-}
-
-bool JsopDocumentHandler::popArray() noexcept {
-	JsopValue *new_values;
-	size_t n;
-
-	assert((StackEnd - StackStart) > 0 && (StackEnd - StackStart) >= PrevStackSize && PrevStackSize > 0);
-
-	auto values_start = StackStart + PrevStackSize;
-	if (JSOP_LIKELY(values_start[-1].getType() == JsopValue::PartialArrayType)) {
-		n = static_cast<size_t>(StackEnd - values_start);
-		if (n <= JsopValue::MAX_SIZE) {
-			new_values = nullptr;
-			auto stack_size = values_start[-1].getStackSize();
-			if (JSOP_LIKELY(n > 0)) {
-				if (JSOP_LIKELY(stack_size > 0)) {
-					new_values = Pools.alloc<JsopValue>(n);
-					if (new_values != nullptr) {
-						memcpy(new_values, values_start, sizeof(JsopValue) * n);
-					} else {
-						return false;
-					}
-					StackEnd = values_start;
-				} else {
-					new_values = values_start;
-				}
-			}
-			PrevStackSize = stack_size;
-			values_start[-1].setArray(new_values, n);
-			return true;
-		}
-	}
-	return false;
-}
-
-bool JsopDocumentHandler::popObject() noexcept {
-	JsopValue *new_values;
-	size_t n, new_object_size;
-
-	assert((StackEnd - StackStart) > 0 && (StackEnd - StackStart) >= PrevStackSize && PrevStackSize > 0);
-
-	auto values_start = StackStart + PrevStackSize;
-	if (JSOP_LIKELY(values_start[-1].getType() == JsopValue::PartialObjectType)) {
-		n = static_cast<size_t>(StackEnd - values_start);
-		assert((n % 2) == 0);
-		new_object_size = n / 2;
-		if (new_object_size <= JsopValue::MAX_SIZE) {
-			auto values_start = StackStart + PrevStackSize;
-			new_values = nullptr;
-			auto stack_size = values_start[-1].getStackSize();
-			if (JSOP_LIKELY(n > 0)) {
-				if (JSOP_LIKELY(stack_size > 0)) {
-					new_values = Pools.alloc<JsopValue>(n);
-					if (new_values != nullptr) {
-						memcpy(new_values, values_start, sizeof(JsopValue) * n);
-					} else {
-						return false;
-					}
-					StackEnd = values_start;
-				} else {
-					new_values = values_start;
-				}
-			}
-			PrevStackSize = stack_size;
-			values_start[-1].setObject(new_values, new_object_size);
-			return true;
-		}
 	}
 	return false;
 }

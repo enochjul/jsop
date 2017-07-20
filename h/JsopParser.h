@@ -23,6 +23,10 @@
 #include "JsopMemoryPools.h"
 #include "JsopStringBuffer.h"
 
+#ifdef JSOP_STRING_MULTI_BYTE_COPY
+
+#ifdef __SSE2__
+
 template <typename T>
 struct JsopCountTrailingZerosReturnType {
         T Count;
@@ -40,6 +44,10 @@ JSOP_INLINE JsopCountTrailingZerosReturnType<uint32_t> jsop_count_trailing_zeros
                 : "cc");
         return { count, zero_value };
 }
+
+#endif
+
+#endif
 
 class JsopDocument;
 class JsopValue;
