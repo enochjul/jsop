@@ -260,7 +260,7 @@ bool JsopPackedDocumentHandler<IO>::makeInteger(uint64_t value, bool negative) n
 	if (new_value != nullptr) {
 		if (!negative) {
 			if (value < (static_cast<size_type>(1) << (sizeof(size_type) * CHAR_BIT - value_type::VALUE_TYPE_NUMBER_OF_BITS - 1))) {
-				new_value->setPackedInt(static_cast<int64_t>(value));
+				new_value->setPackedInt(static_cast<typename value_type::ssize_type>(value));
 				return true;
 			} else if (value < (static_cast<size_type>(1) << (sizeof(size_type) * CHAR_BIT - value_type::VALUE_TYPE_NUMBER_OF_BITS))) {
 				new_value->setPackedUint(value);

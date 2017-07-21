@@ -3375,6 +3375,7 @@ state_key_values:
 #ifdef JSOP_PARSE_UNQUOTED_KEY
 		case '\\':
 			Buffer.clear();
+			ParsingIdContinue = false;
 			goto state_unquoted_key_escaped_char;
 #endif
 
@@ -3579,6 +3580,7 @@ state_unquoted_key_id_continue:
 #endif
 
 				case '\\':
+					ParsingIdContinue = true;
 					goto state_unquoted_key_escaped_char;
 
 				default:
@@ -6678,6 +6680,7 @@ state_key_values:
 #ifdef JSOP_PARSE_UNQUOTED_KEY
 	case '\\':
 		Buffer.clear();
+		ParsingIdContinue = false;
 		goto state_unquoted_key_escaped_char;
 #endif
 
@@ -6879,6 +6882,7 @@ state_unquoted_key_id_continue:
 #endif
 
 			case '\\':
+				ParsingIdContinue = true;
 				goto state_unquoted_key_escaped_char;
 
 			default:

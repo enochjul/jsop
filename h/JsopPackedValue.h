@@ -428,8 +428,10 @@ public:
 		setTypeAndOffset(JsopPackedValueType::Bool, static_cast<size_type>(value));
 	}
 
-	void setPackedInt(typename std::make_signed<size_type>::type value) noexcept {
-		setTypeAndOffset(JsopPackedValueType::PackedInt, static_cast<size_type>(value));
+	void setPackedInt(ssize_type value) noexcept {
+		assert(value >= -(static_cast<ssize_type>(1) << (sizeof(size_type) * CHAR_BIT - VALUE_TYPE_NUMBER_OF_BITS - 1)) &&
+			value < (static_cast<ssize_type>(1) << (sizeof(size_type) * CHAR_BIT - VALUE_TYPE_NUMBER_OF_BITS - 1)));
+		Value = (value << VALUE_TYPE_NUMBER_OF_BITS) | static_cast<size_type>(JsopPackedValueType::PackedInt);
 	}
 
 	void setPackedUint(size_type value) noexcept {
