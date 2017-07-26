@@ -49,8 +49,9 @@ bool JsopDocumentHandler::finish(JsopDocument *doc) noexcept {
 	if (StackAllocEnd > StackEnd) {
 		stack_start = static_cast<JsopValue *>(realloc(StackStart, (StackEnd - StackStart) * sizeof(JsopValue)));
 		if (stack_start != nullptr && stack_start != StackStart) {
-			if ((stack_start->getType() == JsopValue::ArrayType ||
-				stack_start->getType() == JsopValue::ObjectType) &&
+			auto type = stack_start->getType();
+			if ((type == JsopValue::ArrayType ||
+				type == JsopValue::ObjectType) &&
 				stack_start->getValues() != nullptr) {
 				assert(stack_start->getValues() == StackStart + 1);
 				stack_start->setValues(stack_start + 1);
@@ -124,7 +125,7 @@ bool JsopDocumentHandler::makeString(const char *start, const char *end) noexcep
 		//Check the length of the string (including the null terminator) to determine
 		//the storage mechanism
 		n = end - start;
-		if (n < (sizeof(size_t) / sizeof(char))) {
+		if (n < (sizeof(JsopValue) - sizeof(JsopValue::SmallString::size_type))) {
 			//Small strings are store within the value itself
 			new_value->setSmallString(n, start);
 			return true;

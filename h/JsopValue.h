@@ -139,50 +139,61 @@ public:
 	typedef size_t size_type;
 
 	enum : size_type {
+		VALUE_TYPE_NUMBER_OF_BITS = 4,
 #if JSOP_WORD_SIZE == 64
-		MAX_SIZE = (UINT64_C(1) << (64 - 4)) - 1
+		MAX_SIZE = (UINT64_C(1) << (64 - VALUE_TYPE_NUMBER_OF_BITS)) - 1
 #else
-		MAX_SIZE = (1U << (32 - 4)) - 1
+		MAX_SIZE = (1U << (32 - VALUE_TYPE_NUMBER_OF_BITS)) - 1
 #endif
 	};
 
-private:
-	struct {
-		size_type Type : 4;
-		size_type Size : sizeof(size_type) * CHAR_BIT - 4;
+	struct SmallString {
+		typedef uint8_t size_type;
+		typedef char value_type;
+
+		size_type TypeAndSize;
+		value_type Data[sizeof(JsopValue::size_type) * 2 - sizeof(size_type)];
 	};
+	static_assert(sizeof(SmallString) == sizeof(size_type) * 2, "sizeof(SmallString) == sizeof(size_type) * 2");
+
+private:
 	union {
-		JsopValue *Values;
-		JsopKeyValue *KeyValues;
-		const char *String;
-		char SmallString[sizeof(size_t) / sizeof(char)];
+		struct {
+			size_type TypeAndSize;
+			union {
+				JsopValue *Values;
+				JsopKeyValue *KeyValues;
+				const char *String;
 #if JSOP_WORD_SIZE == 64
-		int64_t Int64;
-		double Double;
+				int64_t Int64;
+				double Double;
 #else
-		int32_t Int32;
-		int64_t *Int64;
-		uint64_t *Uint64;
-		double *Double;
+				int32_t Int32;
+				int64_t *Int64;
+				uint64_t *Uint64;
+				double *Double;
 #endif
-		size_t StackSize;
+				size_type StackSize;
+			};
+		} Value;
+		SmallString mySmallString;
 	};
 
 public:
 	ValueType getType() const noexcept {
-		return static_cast<ValueType>(Type);
+		return static_cast<ValueType>(Value.TypeAndSize & ((1 << VALUE_TYPE_NUMBER_OF_BITS) - 1));
 	}
 
 	bool isNull() const noexcept {
-		return Type == NullType;
+		return Value.TypeAndSize == NullType;
 	}
 
 	bool isBool() const noexcept {
-		return Type == BoolType;
+		return getType() == BoolType;
 	}
 
 	JSOP_INLINE bool isInteger() const noexcept {
-		switch (Type) {
+		switch (getType()) {
 #if JSOP_WORD_SIZE == 32
 		case Int32Type:
 		case Uint32Type:
@@ -197,7 +208,7 @@ public:
 	}
 
 	JSOP_INLINE bool isSignedInteger() const noexcept {
-		switch (Type) {
+		switch (getType()) {
 #if JSOP_WORD_SIZE == 32
 		case Int32Type:
 #endif
@@ -210,7 +221,7 @@ public:
 	}
 
 	JSOP_INLINE bool isUnsignedInteger() const noexcept {
-		switch (Type) {
+		switch (getType()) {
 #if JSOP_WORD_SIZE == 32
 		case Uint32Type:
 #endif
@@ -223,11 +234,11 @@ public:
 	}
 
 	bool isDouble() const noexcept {
-		return Type == DoubleType;
+		return getType() == DoubleType;
 	}
 
 	JSOP_INLINE bool isString() const noexcept {
-		switch (Type) {
+		switch (getType()) {
 		case SmallStringType:
 		case StringType:
 			return true;
@@ -238,15 +249,15 @@ public:
 	}
 
 	bool isArray() const noexcept {
-		return Type == ArrayType;
+		return getType() == ArrayType;
 	}
 
 	bool isObject() const noexcept {
-		return Type == ObjectType;
+		return getType() == ObjectType;
 	}
 
 	const JsopValue *getValues() const noexcept {
-		return Values;
+		return Value.Values;
 	}
 
 	JSOP_INLINE JsopArrayView getArrayView() const noexcept;
@@ -256,188 +267,182 @@ public:
 		const char *start;
 		const char *finish;
 
-		if (Type == SmallStringType) {
-			start = SmallString;
-			finish = start + Size;
+		if (getType() == SmallStringType) {
+			start = mySmallString.Data;
+			finish = start + ((Value.TypeAndSize >> VALUE_TYPE_NUMBER_OF_BITS) & ((1 << (CHAR_BIT - VALUE_TYPE_NUMBER_OF_BITS)) - 1));
 		} else {
-			assert(Type == StringType);
-			start = String;
-			finish = start + Size;
+			assert(getType() == StringType);
+			start = Value.String;
+			finish = start + (Value.TypeAndSize >> VALUE_TYPE_NUMBER_OF_BITS);
 		}
 		return JsopStringView(start, finish);
 	}
 
 	//! Gets the null-terminated string stored in the value
 	const char *c_str() const noexcept {
-		if (Type == SmallStringType) {
-			return SmallString;
+		if (getType() == SmallStringType) {
+			return mySmallString.Data;
 		} else {
-			assert(Type == StringType);
-			return String;
+			assert(getType() == StringType);
+			return Value.String;
 		}
 	}
 
 	bool getBool() const noexcept {
-		assert(Type == BoolType);
+		assert(getType() == BoolType);
 
 #if JSOP_WORD_SIZE == 64
-		return Int64 != 0;
+		return Value.Int64 != 0;
 #else
-		return Int32 != 0;
+		return Value.Int32 != 0;
 #endif
 	}
 
 	double getDouble() const noexcept {
-		assert(Type == DoubleType);
+		assert(getType() == DoubleType);
 #if JSOP_WORD_SIZE == 64
-		return Double;
+		return Value.Double;
 #else
-		return *Double;
+		return *(Value.Double);
 #endif
 	}
 
 	JSOP_INLINE size_type size() const noexcept;
 
 	size_t getStackSize() const noexcept {
-		assert(Type == ArrayType || Type == ObjectType);
-		return StackSize;
+		assert(getType() == ArrayType || getType() == ObjectType);
+		return Value.StackSize;
+	}
+
+	void setTypeAndSize(ValueType type, size_type n) noexcept {
+		Value.TypeAndSize = static_cast<size_type>(type) | (n << VALUE_TYPE_NUMBER_OF_BITS);
 	}
 
 	void setNull() noexcept {
-		Type = NullType;
-		Size = 0;
+		Value.TypeAndSize = NullType;
 	}
 
 	void setValues(JsopValue *value) noexcept {
-		Values = value;
+		Value.Values = value;
 	}
 
 	void setArray(JsopValue *value, size_type n) noexcept {
-		Type = ArrayType;
-		Size = n;
-		Values = value;
+		setTypeAndSize(ArrayType, n);
+		Value.Values = value;
 	}
 
 	void setObject(JsopValue *value, size_type n) noexcept {
-		Type = ObjectType;
-		Size = n;
-		Values = value;
+		setTypeAndSize(ObjectType, n);
+		Value.Values = value;
 	}
 
 	void setSmallString(size_type n, const char *value) noexcept {
-		Type = SmallStringType;
-		Size = n;
-		StackSize = *reinterpret_cast<const size_t *>(value);
-		SmallString[n] = '\0';
+		assert(n < sizeof(mySmallString.Data));
+
+		size_type v0, v1;
+		memcpy(&v0, value, sizeof(size_type));
+		memcpy(&v1, value + (sizeof(size_type) - 1), sizeof(size_type));
+		Value.TypeAndSize = static_cast<size_type>(SmallStringType) | (n << VALUE_TYPE_NUMBER_OF_BITS) | (v0 << CHAR_BIT);
+		Value.StackSize = v1;
+		mySmallString.Data[n] = '\0';
 	}
 
 	void setString(size_type n, const char *value) noexcept {
-		Type = StringType;
-		Size = n;
-		String = value;
+		setTypeAndSize(StringType, n);
+		Value.String = value;
 	}
 
 	void setBool(bool value) noexcept {
-		Type = BoolType;
-		Size = 0;
+		Value.TypeAndSize = BoolType;
 #if JSOP_WORD_SIZE == 64
-		Int64 = static_cast<decltype(Int64)>(value);
+		Value.Int64 = static_cast<decltype(Value.Int64) > (value);
 #else
-		Int32 = static_cast<decltype(Int32)>(value);
+		Value.Int32 = static_cast<decltype(Value.Int32) > (value);
 #endif
 	}
 
 #if JSOP_WORD_SIZE == 64
 	void setDouble(double value) noexcept {
-		Type = DoubleType;
-		Size = 0;
-		Double = value;
+		Value.TypeAndSize = DoubleType;
+		Value.Double = value;
 	}
 #else
 	void setDouble(double *value) noexcept {
-		Type = DoubleType;
-		Size = 0;
-		Double = value;
+		Value.TypeAndSize = DoubleType;
+		Value.Double = value;
 	}
 #endif
 
 #if JSOP_WORD_SIZE == 64
 	void setInt64(int64_t value) noexcept {
-		Type = Int64Type;
-		Size = 0;
-		Int64 = value;
+		Value.TypeAndSize = Int64Type;
+		Value.Int64 = value;
 	}
 
 	void setUint64(uint64_t value) noexcept {
-		Type = Uint64Type;
-		Size = 0;
-		Int64 = static_cast<int64_t>(value);
+		Value.TypeAndSize = Uint64Type;
+		Value.Int64 = static_cast<int64_t>(value);
 	}
 #else
 	void setInt32(int32_t value) noexcept {
-		Type = Int32Type;
-		Size = 0;
-		Int32 = value;
+		Value.TypeAndSize = Int32Type;
+		Value.Int32 = value;
 	}
 
 	void setUint32(uint32_t value) noexcept {
-		Type = Uint32Type;
-		Size = 0;
-		Int32 = static_cast<int32_t>(value);
+		Value.TypeAndSize = Uint32Type;
+		Value.Int32 = static_cast<int32_t>(value);
 	}
 
 	void setInt64(int64_t *value) noexcept {
-		Type = Int64Type;
-		Size = 0;
-		Int64 = value;
+		Value.TypeAndSize = Int64Type;
+		Value.Int64 = value;
 	}
 
 	void setUint64(uint64_t *value) noexcept {
-		Type = Uint64Type;
-		Size = 0;
-		Uint64 = value;
+		Value.TypeAndSize = Uint64Type;
+		Value.Uint64 = value;
 	}
 #endif
 
 	void setPartialObject(size_t value) noexcept {
-		Type = ObjectType;
-		Size = 0;
-		StackSize = value;
+		Value.TypeAndSize = ObjectType;
+		Value.StackSize = value;
 	}
 
 	void setPartialArray(size_t value) noexcept {
-		Type = ArrayType;
-		Size = 0;
-		StackSize = value;
+		Value.TypeAndSize = ArrayType;
+		Value.StackSize = value;
 	}
 
 	//! Converts the value into a 64-bit signed integer
 	int64_t toInt64() const noexcept {
-		switch (Type) {
+		switch (getType()) {
 #if JSOP_WORD_SIZE == 64
 		case BoolType:
 		case Int64Type:
 		case Uint64Type:
-			return Int64;
+			return Value.Int64;
 
 		case DoubleType:
-			return static_cast<int64_t>(Double);
+			return static_cast<int64_t>(Value.Double);
+
 #else
 		case BoolType:
 		case Int32Type:
-			return Int32;
+			return Value.Int32;
 
 		case Uint32Type:
-			return static_cast<uint32_t>(Int32);
+			return static_cast<uint32_t>(Value.Int32);
 
 		case Int64Type:
-			return *Int64;
+			return *(Value.Int64);
 
 		case Uint64Type:
-			return *Uint64;
+			return *(Value.Uint64);
 
 		case DoubleType:
-			return static_cast<int64_t>(*Double);
+			return static_cast<int64_t>(*(Value.Double));
 #endif
 
 		default:
@@ -447,29 +452,30 @@ public:
 
 	//! Converts the value into a 64-bit unsigned integer
 	uint64_t toUint64() const noexcept {
-		switch (Type) {
+		switch (getType()) {
 #if JSOP_WORD_SIZE == 64
 		case BoolType:
 		case Int64Type:
 		case Uint64Type:
-			return static_cast<uint64_t>(Int64);
+			return static_cast<uint64_t>(Value.Int64);
 
 		case DoubleType:
-			return static_cast<uint64_t>(Double);
+			return static_cast<uint64_t>(Value.Double);
+
 #else
 		case BoolType:
 		case Int32Type:
 		case Uint32Type:
-			return Int32;
+			return Value.Int32;
 
 		case Int64Type:
-			return *Int64;
+			return *(Value.Int64);
 
 		case Uint64Type:
-			return *Uint64;
+			return *(Value.Uint64);
 
 		case DoubleType:
-			return static_cast<int64_t>(*Double);
+			return static_cast<int64_t>(*(Value.Double));
 #endif
 		default:
 			return 0;
@@ -478,33 +484,33 @@ public:
 
 	//! Converts the value into a double precision number
 	double toDouble() const noexcept {
-		switch (Type) {
+		switch (getType()) {
 #if JSOP_WORD_SIZE == 64
 		case BoolType:
 		case Int64Type:
-			return static_cast<double>(Int64);
+			return static_cast<double>(Value.Int64);
 
 		case Uint64Type:
-			return static_cast<double>(static_cast<uint64_t>(Int64));
+			return static_cast<double>(static_cast<uint64_t>(Value.Int64));
 
 		case DoubleType:
-			return Double;
+			return Value.Double;
 #else
 		case BoolType:
 		case Int32Type:
-			return static_cast<double>(Int32);
+			return static_cast<double>(Value.Int32);
 
 		case Uint32Type:
-			return static_cast<double>(static_cast<uint32_t>(Int32));
+			return static_cast<double>(static_cast<uint32_t>(Value.Int32));
 
 		case Int64Type:
-			return static_cast<double>(*Int64);
+			return static_cast<double>(*(Value.Int64));
 
 		case Uint64Type:
-			return static_cast<double>(*Uint64);
+			return static_cast<double>(*(Value.Uint64));
 
 		case DoubleType:
-			return *Double;
+			return *(Value.Double);
 #endif
 
 		default:
@@ -525,18 +531,22 @@ static_assert(offsetof(JsopKeyValue, Key) == 0, "offsetof(JsopKeyValue, Key) == 
 static_assert(offsetof(JsopKeyValue, Value) == sizeof(JsopValue), "offsetof(JsopKeyValue, Value) == sizeof(JsopValue)");
 
 JSOP_INLINE JsopArrayView JsopValue::getArrayView() const noexcept {
-	assert(Type == ArrayType);
-	return JsopArrayView(Values, Values + Size);
+	assert(getType() == ArrayType);
+	return JsopArrayView(Value.Values, Value.Values + (Value.TypeAndSize >> VALUE_TYPE_NUMBER_OF_BITS));
 }
 
 JSOP_INLINE JsopObjectView JsopValue::getObjectView() const noexcept {
-	assert(Type == ObjectType);
-	return JsopObjectView(KeyValues, KeyValues + Size);
+	assert(getType() == ObjectType);
+	return JsopObjectView(Value.KeyValues, Value.KeyValues + (Value.TypeAndSize >> VALUE_TYPE_NUMBER_OF_BITS));
 }
 
 JSOP_INLINE JsopValue::size_type JsopValue::size() const noexcept {
-	assert(Type == ArrayType || Type == ObjectType || Type == SmallStringType || Type == StringType);
-	return Size;
+	assert(getType() == ArrayType || getType() == ObjectType || getType() == SmallStringType || getType() == StringType);
+	size_type n = Value.TypeAndSize >> VALUE_TYPE_NUMBER_OF_BITS;
+	if (JSOP_UNLIKELY(getType() == SmallStringType)) {
+		n &= (1 << (CHAR_BIT - VALUE_TYPE_NUMBER_OF_BITS)) - 1;
+	}
+	return n;
 }
 
 JSOP_INLINE JsopArrayView::size_type JsopArrayView::size() const noexcept {

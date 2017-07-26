@@ -11,6 +11,7 @@
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <type_traits>
 
@@ -468,14 +469,11 @@ public:
 	void setTinyString(size_t n, const char *s) noexcept {
 		assert(n <= ((sizeof(size_type) - sizeof(typename TinyString::size_type) - sizeof(char)) / sizeof(char)));
 
-		Value = (n << VALUE_TYPE_NUMBER_OF_BITS) | static_cast<size_type>(JsopPackedValueType::TinyString);
-		if (n > 0) {
-			char *data = myString.Data;
-			for (size_t i = 0; i < n; ++i) {
-				data[i] = s[i];
-			}
-			data[n] = '\0';
-		}
+		size_type v;
+
+		memcpy(&v, s, sizeof(v));
+		v &= (static_cast<size_type>(1) << (n * 8)) - 1;
+		Value = static_cast<size_type>(JsopPackedValueType::TinyString) | (n << VALUE_TYPE_NUMBER_OF_BITS) | (v << CHAR_BIT);
 	}
 
 	void setSmallString(size_type offset) noexcept {
