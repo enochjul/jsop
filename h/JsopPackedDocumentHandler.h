@@ -37,7 +37,7 @@ class JsopPackedDocumentHandler : public IO {
 	//! The caller must initialize the value returned
 	JSOP_INLINE value_type *makeValue() noexcept {
 		auto new_value = StackEnd;
-		if (new_value == StackAllocEnd) {
+		if (JSOP_UNLIKELY(new_value == StackAllocEnd)) {
 			new_value = resizeStack();
 			if (new_value == nullptr) {
 				return nullptr;
@@ -116,7 +116,7 @@ public:
 		return StackStart[PrevStackSize - 1].isPartialObject();
 	}
 
-	bool makeNull() noexcept {
+	JSOP_INLINE bool makeNull() noexcept {
 		auto new_value = makeValue();
 		if (new_value != nullptr) {
 			new_value->setNull();
@@ -126,7 +126,7 @@ public:
 		}
 	}
 
-	bool makeBool(bool value) noexcept {
+	JSOP_INLINE bool makeBool(bool value) noexcept {
 		auto new_value = makeValue();
 		if (new_value != nullptr) {
 			new_value->setBool(value);
@@ -138,7 +138,7 @@ public:
 
 	bool makeInteger(uint64_t value, bool negative) noexcept;
 
-	bool makeDouble(value_type *new_value, double value) noexcept {
+	JSOP_INLINE bool makeDouble(value_type *new_value, double value) noexcept {
 		if (sizeof(size_type) >= sizeof(double)) {
 			union {
 				uint64_t Uint64Value;
@@ -146,7 +146,7 @@ public:
 			} u;
 			u.DoubleValue = value;
 			auto e = (u.Uint64Value >> (DBL_MANT_DIG - 1)) & ((1 << (sizeof(double) * CHAR_BIT - DBL_MANT_DIG)) - 1);
-			if (e >= ((2 - DBL_MIN_EXP) - value_type::PACKED_DOUBLE_EXPONENT_BIAS) && e <= ((2 - DBL_MIN_EXP) + (value_type::PACKED_DOUBLE_EXPONENT_BIAS + 1))) {
+			if (JSOP_LIKELY(e >= ((2 - DBL_MIN_EXP) - value_type::PACKED_DOUBLE_EXPONENT_BIAS) && e <= ((2 - DBL_MIN_EXP) + (value_type::PACKED_DOUBLE_EXPONENT_BIAS + 1)))) {
 				new_value->setPackedDouble(value);
 				return true;
 			}
@@ -155,22 +155,34 @@ public:
 		return !(new_value->isNull());
 	}
 
-	bool makeDouble(double value) noexcept {
+	bool makeDouble(double value) noexcept;
+
+	//! Makes a null-terminated string indicated by the (start, end) pair
+	JSOP_INLINE bool makeString(const char *start, const char *end) noexcept {
 		auto new_value = makeValue();
 		if (new_value != nullptr) {
-			return makeDouble(new_value, value);
+			size_t n = static_cast<size_t>(end - start);
+			if (JSOP_LIKELY(n <= std::numeric_limits<typename SmallString::size_type>::max())) {
+				if (JSOP_LIKELY(n > (sizeof(size_type) - sizeof(typename TinyString::size_type) - sizeof(char)) / sizeof(char))) {
+					*new_value = IO::writeSmallString(n, start);
+					return !(new_value->isNull());
+				} else {
+					*new_value = value_type::makeTinyString(n, start);
+					return true;
+				}
+			} else {
+				*new_value = IO::writeString(n, start);
+				return !(new_value->isNull());
+			}
 		}
 		return false;
 	}
-
-	//! Makes a null-terminated string indicated by the (start, end) pair
-	bool makeString(const char *start, const char *end) noexcept;
-	bool makeString(const char *start, const char *end, bool) noexcept {
+	JSOP_INLINE bool makeString(const char *start, const char *end, bool) noexcept {
 		return makeString(start, end);
 	}
 
 	//! Makes a new array, and push the context to add subsequent values to the array
-	bool pushArray() noexcept {
+	JSOP_INLINE bool pushArray() noexcept {
 		auto new_value = makeValue();
 		if (new_value != nullptr) {
 			new_value->setPartialArray(PrevStackSize);
@@ -183,7 +195,7 @@ public:
 	}
 
 	//! Finish parsing of an array and return to the previous context
-	bool popArray() noexcept {
+	JSOP_INLINE bool popArray() noexcept {
 		assert((StackEnd - StackStart) >= PrevStackSize && PrevStackSize > 0);
 
 		auto values_start = StackStart + PrevStackSize;
@@ -202,7 +214,7 @@ public:
 	}
 
 	//! Makes a new object, and push the context to add subsequent (key, value) pairs to the object
-	bool pushObject() noexcept {
+	JSOP_INLINE bool pushObject() noexcept {
 		auto new_value = makeValue();
 		if (new_value != nullptr) {
 			new_value->setPartialObject(PrevStackSize);
@@ -215,7 +227,7 @@ public:
 	}
 
 	//! Finish parsing of an object and return to the previous context
-	bool popObject() noexcept {
+	JSOP_INLINE bool popObject() noexcept {
 		assert((StackEnd - StackStart) >= PrevStackSize && PrevStackSize > 0);
 
 		auto values_start = StackStart + PrevStackSize;
@@ -288,22 +300,10 @@ bool JsopPackedDocumentHandler<IO>::makeInteger(uint64_t value, bool negative) n
 }
 
 template <class IO>
-bool JsopPackedDocumentHandler<IO>::makeString(const char *start, const char *end) noexcept {
+bool JsopPackedDocumentHandler<IO>::makeDouble(double value) noexcept {
 	auto new_value = makeValue();
 	if (new_value != nullptr) {
-		size_t n = static_cast<size_t>(end - start);
-		if (JSOP_LIKELY(n <= std::numeric_limits<typename SmallString::size_type>::max())) {
-			if (JSOP_LIKELY(n > (sizeof(size_type) - sizeof(typename TinyString::size_type) - sizeof(char)) / sizeof(char))) {
-				*new_value = IO::writeSmallString(n, start);
-				return !(new_value->isNull());
-			} else {
-				*new_value = value_type::makeTinyString(n, start);
-				return true;
-			}
-		} else {
-			*new_value = IO::writeString(n, start);
-			return !(new_value->isNull());
-		}
+		return makeDouble(new_value, value);
 	}
 	return false;
 }

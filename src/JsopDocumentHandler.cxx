@@ -114,34 +114,3 @@ bool JsopDocumentHandler::makeInteger(uint64_t value, bool negative) noexcept {
 	return false;
 }
 #endif
-
-bool JsopDocumentHandler::makeString(const char *start, const char *end) noexcept {
-	JsopValue *new_value;
-	char *new_string;
-	size_t n;
-
-	new_value = makeValue();
-	if (new_value != nullptr) {
-		//Check the length of the string (including the null terminator) to determine
-		//the storage mechanism
-		n = end - start;
-		if (n < (sizeof(JsopValue) - sizeof(JsopValue::SmallString::size_type))) {
-			//Small strings are store within the value itself
-			new_value->setSmallString(n, start);
-			return true;
-		} else if (JSOP_LIKELY(n <= JsopValue::MAX_SIZE)) {
-			//Allocate the string and store a pointer to the allocated value
-			new_string = Pools.alloc<char>(n + 1);
-			if (new_string != nullptr) {
-				new_value->setString(n, new_string);
-				//Copy the string and terminate it with the null character
-				memcpy(new_string, start, n);
-				new_string[n] = '\0';
-				return true;
-			}
-		}
-		//Either the length is too large or it cannot allocate the memory
-		new_value->setNull();
-	}
-	return false;
-}

@@ -44,47 +44,12 @@ private:
 	static_assert(MAX_ALLOC_SIZE % MINIMUM_ALIGNMENT == 0, "MAX_ALLOC_SIZE % MINIMUM_ALIGNMENT == 0");
 
 	template <size_t TypeAlignment>
-	void *resize_and_allocate(size_t n) noexcept {
-		static_assert(TypeAlignment <= alignof(max_align_t), "TypeAlignment <= alignof(max_align_t)");
-
-		auto free_size = FreeSize;
-		size_t alloc_size = static_cast<uint8_t *>(End) - static_cast<uint8_t *>(Start);
-		auto aligned_alloc_size = alloc_size + (free_size % TypeAlignment);
-		if (n <= MAX_ALLOC_SIZE - aligned_alloc_size) {
-			auto new_alloc_size = aligned_alloc_size + n;
-			auto new_capacity = alloc_size + free_size;
-			if (JSOP_LIKELY(new_capacity <= MAX_ALLOC_SIZE / 2)) {
-				new_capacity *= 2;
-				if (JSOP_UNLIKELY(new_capacity < new_alloc_size)) {
-					new_capacity = ((new_alloc_size + alignof(max_align_t) - 1) / alignof(max_align_t)) * alignof(max_align_t);
-				}
-			} else {
-				if (sizeof(size_t) > sizeof(size_type) || MINIMUM_ALIGNMENT < (1 << value_type::VALUE_TYPE_NUMBER_OF_BITS)) {
-					new_capacity = MAX_ALLOC_SIZE;
-				} else {
-					new_capacity = ((new_alloc_size + alignof(max_align_t) - 1) / alignof(max_align_t)) * alignof(max_align_t);
-				}
-			}
-
-			auto new_start = realloc(Start, new_capacity);
-			if (new_start != nullptr) {
-				auto *new_aligned_end = static_cast<uint8_t *>(new_start) + aligned_alloc_size;
-				if (PadWithZero) {
-					for (auto *new_end = static_cast<uint8_t *>(new_start) + alloc_size; new_end < new_aligned_end; ++new_end) {
-						*new_end = 0;
-					}
-				}
-				Start = new_start;
-				End = static_cast<uint8_t *>(new_start) + new_alloc_size;
-				FreeSize = new_capacity - new_alloc_size;
-				return new_aligned_end;
-			}
-		}
-		return nullptr;
-	}
+	void *resize_and_allocate(size_t n) noexcept;
 
 	template <size_t TypeAlignment>
-	void *allocate(size_t n) noexcept {
+	JSOP_INLINE void *allocate(size_t n) noexcept {
+		static_assert(TypeAlignment <= alignof(max_align_t), "TypeAlignment <= alignof(max_align_t)");
+
 		auto free_size = FreeSize;
 		auto aligned_free_size = (free_size / TypeAlignment) * TypeAlignment;
 		if (JSOP_LIKELY(n <= aligned_free_size)) {
@@ -110,13 +75,13 @@ private:
 	}
 
 	template <typename T>
-	T *try_alloc() noexcept {
+	JSOP_INLINE T *try_alloc() noexcept {
 		constexpr size_t alignment = (MinimumAlignmentOnly || alignof(T) <= MINIMUM_ALIGNMENT) ? MINIMUM_ALIGNMENT : alignof(T);
 		return static_cast<T *>(allocate<alignment>(sizeof(T)));
 	}
 
 	template <typename T, size_t sentinel_n = 0>
-	T *try_alloc_flexible_array(size_t n) noexcept {
+	JSOP_INLINE T *try_alloc_flexible_array(size_t n) noexcept {
 		constexpr size_t alignment = (MinimumAlignmentOnly || alignof(T) <= MINIMUM_ALIGNMENT) ? MINIMUM_ALIGNMENT : alignof(T);
 
 		if (n <= (((MAX_ALLOC_SIZE - T::sizeofHeader()) / sizeof(typename T::value_type)) - sentinel_n)) {
@@ -179,7 +144,7 @@ public:
 	}
 
 	template <JsopPackedValueType type, typename T>
-	value_type writeValue(T value) noexcept {
+	JSOP_INLINE value_type writeValue(T value) noexcept {
 		auto *new_value = try_alloc<T>();
 		if (new_value != nullptr) {
 			*new_value = value;
@@ -191,17 +156,17 @@ public:
 		}
 	}
 
-	value_type writeInt64(int64_t value) noexcept {
+	JSOP_INLINE value_type writeInt64(int64_t value) noexcept {
 		return writeValue<JsopPackedValueType::FullInt64, int64_t>(value);
 	}
-	value_type writeUint64(uint64_t value) noexcept {
+	JSOP_INLINE value_type writeUint64(uint64_t value) noexcept {
 		return writeValue<JsopPackedValueType::FullUint64, uint64_t>(value);
 	}
-	value_type writeDouble(double value) noexcept {
+	JSOP_INLINE value_type writeDouble(double value) noexcept {
 		return writeValue<JsopPackedValueType::FullDouble, double>(value);
 	}
 
-	value_type writeSmallString(size_t n, const char *s) noexcept {
+	JSOP_INLINE value_type writeSmallString(size_t n, const char *s) noexcept {
 		auto *new_value = try_alloc_flexible_array<JsopPackedSmallString, 1>(n);
 		if (new_value != nullptr) {
 			new_value->Size = static_cast<typename SmallString::size_type>(n);
@@ -214,7 +179,7 @@ public:
 			return value_type::makeNull();
 		}
 	}
-	value_type writeString(size_t n, const char *s) noexcept {
+	JSOP_INLINE value_type writeString(size_t n, const char *s) noexcept {
 		auto *new_value = try_alloc_flexible_array<String, 1>(n);
 		if (new_value != nullptr) {
 			new_value->Size = static_cast<typename String::size_type>(n);
@@ -227,7 +192,7 @@ public:
 			return value_type::makeNull();
 		}
 	}
-	value_type writeArray(size_t n, const value_type *values) noexcept {
+	JSOP_INLINE value_type writeArray(size_t n, const value_type *values) noexcept {
 		auto *new_value = try_alloc_flexible_array<Array>(n);
 		if (new_value != nullptr) {
 			new_value->Size = static_cast<typename Array::size_type>(n);
@@ -239,7 +204,7 @@ public:
 			return value_type::makeNull();
 		}
 	}
-	value_type writeObject(size_t n, const value_type *key_values) noexcept {
+	JSOP_INLINE value_type writeObject(size_t n, const value_type *key_values) noexcept {
 		auto *new_value = try_alloc_flexible_array<Object>(n);
 		if (new_value != nullptr) {
 			new_value->Size = static_cast<typename Object::size_type>(n);
@@ -252,5 +217,46 @@ public:
 		}
 	}
 };
+
+template <class ValueType, bool MinimumAlignmentOnly, bool PadWithZero, size_t DefaultSize>
+template <size_t TypeAlignment>
+void *JsopPackedAllocator<ValueType, MinimumAlignmentOnly, PadWithZero, DefaultSize>::resize_and_allocate(size_t n) noexcept {
+	static_assert(TypeAlignment <= alignof(max_align_t), "TypeAlignment <= alignof(max_align_t)");
+
+	auto free_size = FreeSize;
+	size_t alloc_size = static_cast<uint8_t *>(End) - static_cast<uint8_t *>(Start);
+	auto aligned_alloc_size = alloc_size + (free_size % TypeAlignment);
+	if (n <= MAX_ALLOC_SIZE - aligned_alloc_size) {
+		auto new_alloc_size = aligned_alloc_size + n;
+		auto new_capacity = alloc_size + free_size;
+		if (JSOP_LIKELY(new_capacity <= MAX_ALLOC_SIZE / 2)) {
+			new_capacity *= 2;
+			if (JSOP_UNLIKELY(new_capacity < new_alloc_size)) {
+				new_capacity = ((new_alloc_size + alignof(max_align_t) - 1) / alignof(max_align_t)) * alignof(max_align_t);
+			}
+		} else {
+			if (sizeof(size_t) > sizeof(size_type) || MINIMUM_ALIGNMENT < (1 << value_type::VALUE_TYPE_NUMBER_OF_BITS)) {
+				new_capacity = MAX_ALLOC_SIZE;
+			} else {
+				new_capacity = ((new_alloc_size + alignof(max_align_t) - 1) / alignof(max_align_t)) * alignof(max_align_t);
+			}
+		}
+
+		auto new_start = realloc(Start, new_capacity);
+		if (new_start != nullptr) {
+			auto *new_aligned_end = static_cast<uint8_t *>(new_start) + aligned_alloc_size;
+			if (PadWithZero) {
+				for (auto *new_end = static_cast<uint8_t *>(new_start) + alloc_size; new_end < new_aligned_end; ++new_end) {
+					*new_end = 0;
+				}
+			}
+			Start = new_start;
+			End = static_cast<uint8_t *>(new_start) + new_alloc_size;
+			FreeSize = new_capacity - new_alloc_size;
+			return new_aligned_end;
+		}
+	}
+	return nullptr;
+}
 
 #endif

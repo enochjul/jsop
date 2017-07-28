@@ -30,7 +30,7 @@ class JsopDocumentHandler {
 	//! The caller must initialize the value returned
 	JSOP_INLINE JsopValue *makeValue() noexcept {
 		auto new_value = StackEnd;
-		if (new_value == StackAllocEnd) {
+		if (JSOP_UNLIKELY(new_value == StackAllocEnd)) {
 			new_value = resizeStack();
 			if (new_value == nullptr) {
 				return nullptr;
@@ -157,8 +157,37 @@ public:
 	}
 
 	//! Makes a null-terminated string indicated by the (start, end) pair
-	bool makeString(const char *start, const char *end) noexcept;
-	bool makeString(const char *start, const char *end, bool) noexcept {
+	JSOP_INLINE bool makeString(const char *start, const char *end) noexcept {
+		JsopValue *new_value;
+		char *new_string;
+		size_t n;
+
+		new_value = makeValue();
+		if (new_value != nullptr) {
+			//Check the length of the string (including the null terminator) to determine
+			//the storage mechanism
+			n = end - start;
+			if (n < (sizeof(JsopValue) - sizeof(JsopValue::SmallString::size_type))) {
+				//Small strings are store within the value itself
+				new_value->setSmallString(n, start);
+				return true;
+			} else if (JSOP_LIKELY(n <= JsopValue::MAX_SIZE)) {
+				//Allocate the string and store a pointer to the allocated value
+				new_string = Pools.alloc<char>(n + 1);
+				if (new_string != nullptr) {
+					new_value->setString(n, new_string);
+					//Copy the string and terminate it with the null character
+					memcpy(new_string, start, n);
+					new_string[n] = '\0';
+					return true;
+				}
+			}
+			//Either the length is too large or it cannot allocate the memory
+			new_value->setNull();
+		}
+		return false;
+	}
+	JSOP_INLINE bool makeString(const char *start, const char *end, bool) noexcept {
 		return makeString(start, end);
 	}
 
@@ -174,7 +203,7 @@ public:
 	}
 
 	//! Finish parsing of an array and return to the previous context
-	bool popArray() noexcept {
+	JSOP_INLINE bool popArray() noexcept {
 		JsopValue *new_values;
 		size_t n;
 
@@ -219,7 +248,7 @@ public:
 	}
 
 	//! Finish parsing of an object and return to the previous context
-	bool popObject() noexcept {
+	JSOP_INLINE bool popObject() noexcept {
 		JsopValue *new_values;
 		size_t n, new_object_size;
 
