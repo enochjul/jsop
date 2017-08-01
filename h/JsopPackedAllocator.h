@@ -167,7 +167,7 @@ public:
 	}
 
 	JSOP_INLINE value_type writeSmallString(size_t n, const char *s) noexcept {
-		auto *new_value = try_alloc_flexible_array<JsopPackedSmallString, 1>(n);
+		auto *new_value = try_alloc_flexible_array<SmallString, 1>(n);
 		if (new_value != nullptr) {
 			new_value->Size = static_cast<typename SmallString::size_type>(n);
 			memcpy(new_value->Data, s, n * sizeof(char));
