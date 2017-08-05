@@ -1341,7 +1341,7 @@ action_fractional_part_18_non_zero_digit:
 		if (ch >= '0' && ch <= '9') {
 			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
 			CurrentInteger = current_integer;
-			CurrentExponent -= reinterpret_cast<uintptr_t>(token_end) - reinterpret_cast<uintptr_t>(start) - 1;
+			CurrentExponent -= reinterpret_cast<uintptr_t>(token_end) - reinterpret_cast<uintptr_t>(start);
 			start = token_end;
 			goto state_fractional_part;
 		}
