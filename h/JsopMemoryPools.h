@@ -26,6 +26,10 @@ private:
 	//Destroys the list of pools specified by the start
 	static void destroy(Pool *pool) noexcept;
 
+	//! Allocates memory with the given size
+	template <size_t Alignment>
+	__attribute__((malloc, assume_aligned(Alignment))) void *allocate(const size_t aligned_size) noexcept;
+
 public:
 	JsopMemoryPools() = default;
 	~JsopMemoryPools() noexcept {
@@ -46,76 +50,73 @@ public:
 		pools->Head = nullptr;
 	}
 
-	//! Allocates memory with the given size
-	template <size_t Alignment>
-	__attribute__((malloc)) void *allocate(const size_t size) noexcept;
-
 	template <class T>
 	T *alloc(size_t n = 1) noexcept {
-		return static_cast<T *>(allocate<alignof(T)>(n * sizeof(T)));
+		//Check that the request size is small enough to not overflow
+		if (JSOP_LIKELY(n <= (SIZE_MAX - offsetof(Pool, Data)) / sizeof(T))) {
+			return static_cast<T *>(allocate<alignof(T)>(n * sizeof(T)));
+		} else {
+			return nullptr;
+		}
 	}
 };
 
 template <size_t Alignment>
-void *JsopMemoryPools::allocate(const size_t size) noexcept {
+void *JsopMemoryPools::allocate(const size_t aligned_size) noexcept {
 	static_assert((JSOP_MEMORY_POOL_MIN_SIZE - offsetof(Pool, Data)) % alignof(max_align_t) == 0, "(JSOP_MEMORY_POOL_MIN_SIZE - offsetof(Pool, Data)) % alignof(max_align_t) == 0");
 	static_assert(Alignment <= alignof(max_align_t), "Alignment <= alignof(max_align_t)");
 
 	Pool *pool;
 	Pool *new_pool;
 	void *new_ptr;
-	size_t aligned_size, pool_size, free_size, alloc_size;
+	size_t pool_size, free_size, alloc_size;
 
-	assert(size > 0);
+	assert(aligned_size > 0 && aligned_size % Alignment == 0);
 
-	//Check that the request size is small enough to not overflow
-	if (size <= (SIZE_MAX - (offsetof(Pool, Data) + Alignment - 1))) {
-		//Align the request size and try allocate the space in the current pool
-		aligned_size = (size + (Alignment - 1)) & ~(Alignment - 1);
-		pool = Head;
-		pool_size = SIZE_MAX;
-		if (pool != nullptr) {
-			pool_size = pool->Size;
-			if (JSOP_LIKELY(pool_size < (JSOP_MEMORY_POOL_MIN_SIZE - offsetof(Pool, Data)))) {
-				free_size = (JSOP_MEMORY_POOL_MIN_SIZE - offsetof(Pool, Data)) - pool_size;
+	//Align the request size and try allocate the space in the current pool
+	pool = Head;
+	pool_size = SIZE_MAX;
+	if (pool != nullptr) {
+		pool_size = pool->Size;
+		if (JSOP_LIKELY(pool_size < (JSOP_MEMORY_POOL_MIN_SIZE - offsetof(Pool, Data)))) {
+			free_size = (JSOP_MEMORY_POOL_MIN_SIZE - offsetof(Pool, Data)) - pool_size;
+			if (Alignment > 1) {
+				free_size &= ~(Alignment - 1);
+			}
+			if (JSOP_LIKELY(aligned_size <= free_size)) {
 				if (Alignment > 1) {
-					free_size &= ~(Alignment - 1);
+					pool_size = (JSOP_MEMORY_POOL_MIN_SIZE - offsetof(Pool, Data)) - free_size;
 				}
-				if (JSOP_LIKELY(aligned_size <= free_size)) {
-					if (Alignment > 1) {
-						pool_size = (JSOP_MEMORY_POOL_MIN_SIZE - offsetof(Pool, Data)) - free_size;
-					}
-					new_ptr = static_cast<void *>(pool->Data + pool_size);
-					pool->Size = pool_size + aligned_size;
-					return static_cast<void *>(new_ptr);
-				}
+				new_ptr = static_cast<void *>(pool->Data + pool_size);
+				pool->Size = pool_size + aligned_size;
+				return static_cast<void *>(new_ptr);
 			}
 		}
+	}
 
-		alloc_size = aligned_size + offsetof(Pool, Data);
-		if (JSOP_LIKELY(pool_size > aligned_size)) {
-			//The new pool has at least as much free space as the old pool if
-			//fully allocated, so create and use it for new allocations
-			if (alloc_size < JSOP_MEMORY_POOL_MIN_SIZE) {
-				alloc_size = JSOP_MEMORY_POOL_MIN_SIZE;
-			}
-			new_pool = static_cast<Pool *>(malloc(alloc_size));
-			if (new_pool != nullptr) {
-				new_pool->Next = pool;
-				new_pool->Size = aligned_size;
-				Head = new_pool;
-				return static_cast<void *>(new_pool->Data);
-			}
-		} else {
-			//The current pool has more free space, so allocate the exact size
-			//for the new pool and insert it after the current pool
-			new_pool = static_cast<Pool *>(malloc(alloc_size));
-			if (new_pool != nullptr) {
-				new_pool->Next = pool->Next;
-				new_pool->Size = aligned_size;
-				pool->Next = new_pool;
-				return static_cast<void *>(new_pool->Data);
-			}
+	alloc_size = aligned_size + offsetof(Pool, Data);
+	if (JSOP_LIKELY(pool_size > aligned_size)) {
+		//The new pool has at least as much free space as the old pool if
+		//fully allocated, so create and use it for new allocations
+		if (alloc_size < JSOP_MEMORY_POOL_MIN_SIZE) {
+			alloc_size = JSOP_MEMORY_POOL_MIN_SIZE;
+		}
+		new_pool = static_cast<Pool *>(malloc(alloc_size));
+		if (new_pool != nullptr) {
+			new_pool->Next = pool;
+			new_pool->Size = aligned_size;
+			Head = new_pool;
+			return static_cast<void *>(new_pool->Data);
+		}
+	} else {
+		//The current pool has more free space, so allocate the exact size
+		//for the new pool and insert it after the current pool
+		new_pool = static_cast<Pool *>(malloc(alloc_size));
+		if (new_pool != nullptr) {
+			new_pool->Next = pool->Next;
+			new_pool->Size = aligned_size;
+			pool->Next = new_pool;
+			return static_cast<void *>(new_pool->Data);
 		}
 	}
 	return nullptr;
