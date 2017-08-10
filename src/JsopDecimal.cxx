@@ -2113,7 +2113,7 @@ template <typename T>
 JSOP_INLINE void jsop_uint_shift_left_x1(T *low, T *high, T value, int n) noexcept {
 	assert(n > 0 && n < sizeof(T) * CHAR_BIT * 2);
 
-	if (n >= sizeof(T) * CHAR_BIT) {
+	if (static_cast<unsigned>(n) >= sizeof(T) * CHAR_BIT) {
 		*high = value << (n - sizeof(T) * CHAR_BIT);
 		*low = 0;
 	} else {
@@ -2445,13 +2445,13 @@ double jsop_decimal_to_double(uint64_t significand, int exponent, bool negative)
 	if (significand != 0) {
 		if (exponent >= 0) {
 #ifdef JSOP_USE_FP_MATH
-			if (exponent < jsop_get_array_size(JsopPowersOfTen) && significand < (UINT64_C(1) << DBL_MANT_DIG)) {
+			if (static_cast<unsigned>(exponent) < jsop_get_array_size(JsopPowersOfTen) && significand < (UINT64_C(1) << DBL_MANT_DIG)) {
 				double product = static_cast<double>(static_cast<int64_t>(significand)) * JsopPowersOfTen[exponent];
 				return negative ? -product : product;
 			}
 #endif
 
-			if (exponent < jsop_get_array_size(JsopSmallPowersOfFive)) {
+			if (static_cast<unsigned>(exponent) < jsop_get_array_size(JsopSmallPowersOfFive)) {
 				jsop_uint_multiply_1x1(&remainder, &mantissa, significand, JsopSmallPowersOfFive[exponent]);
 				if (mantissa != 0) {
 					mantissa_bits = jsop_uint_count_significant_bits(mantissa);

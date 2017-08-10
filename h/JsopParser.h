@@ -1475,7 +1475,9 @@ state_fractional_part:
 			goto cleanup_on_error;
 #endif
 		} else {
+#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 action_fractional_part_not_a_digit:
+#endif
 			switch (ch) {
 			case 'E':
 			case 'e':
