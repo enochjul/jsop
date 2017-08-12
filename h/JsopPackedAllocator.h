@@ -19,7 +19,8 @@ template <
 	class ValueType,
 	bool MinimumAlignmentOnly = false,
 	bool PadWithZero = false,
-	size_t DefaultSize = 65536>
+	size_t DefaultSize = 65536,
+	bool RootFirst = true>
 class JsopPackedAllocator {
 public:
 	typedef ValueType value_type;
@@ -107,20 +108,39 @@ public:
 			start = malloc(DefaultSize);
 			if (start != nullptr) {
 				Start = start;
-				End = static_cast<uint8_t *>(start) + sizeof(value_type);
-				FreeSize = DefaultSize - sizeof(value_type);
+				if (RootFirst) {
+					End = static_cast<uint8_t *>(start) + sizeof(value_type);
+					FreeSize = DefaultSize - sizeof(value_type);
+				} else {
+					End = start;
+					FreeSize = DefaultSize;
+				}
 				return true;
 			}
 		} else {
 			//Calculate the current capacity of the memory block
 			size_t capacity = reinterpret_cast<uintptr_t>(End) - reinterpret_cast<uintptr_t>(start) + FreeSize;
-			End = static_cast<uint8_t *>(start) + sizeof(value_type);
-			FreeSize = capacity - sizeof(value_type);
+			if (RootFirst) {
+				End = static_cast<uint8_t *>(start) + sizeof(value_type);
+				FreeSize = capacity - sizeof(value_type);
+			} else {
+				End = start;
+				FreeSize = capacity;
+			}
 			return true;
 		}
 		return false;
 	}
-	bool finish(value_type value, JsopPackedDocument<value_type> *doc) noexcept {
+	bool finish(value_type value, JsopPackedDocument<value_type, RootFirst> *doc) noexcept {
+		if (!RootFirst) {
+			auto *new_value = try_alloc<value_type>();
+			if (new_value != nullptr) {
+				*new_value = value;
+			} else {
+				return false;
+			}
+		}
+
 		//Shrink the allocated memory block to the exact size
 		auto *start = static_cast<value_type *>(Start);
 		uintptr_t n = reinterpret_cast<uintptr_t>(End) - reinterpret_cast<uintptr_t>(start);
@@ -130,7 +150,9 @@ public:
 		}
 
 		//Set the root and transfer ownership to the document
-		*start = value;
+		if (RootFirst) {
+			*start = value;
+		}
 		doc->set(start, reinterpret_cast<char *>(start) + n);
 
 		//Reset to allocate a new memory block on next parse
@@ -218,9 +240,9 @@ public:
 	}
 };
 
-template <class ValueType, bool MinimumAlignmentOnly, bool PadWithZero, size_t DefaultSize>
+template <class ValueType, bool MinimumAlignmentOnly, bool PadWithZero, size_t DefaultSize, bool RootFirst>
 template <size_t TypeAlignment>
-void *JsopPackedAllocator<ValueType, MinimumAlignmentOnly, PadWithZero, DefaultSize>::resize_and_allocate(size_t n) noexcept {
+void *JsopPackedAllocator<ValueType, MinimumAlignmentOnly, PadWithZero, DefaultSize, RootFirst>::resize_and_allocate(size_t n) noexcept {
 	static_assert(TypeAlignment <= alignof(max_align_t), "TypeAlignment <= alignof(max_align_t)");
 
 	auto free_size = FreeSize;

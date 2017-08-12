@@ -24,7 +24,8 @@ template <
 	bool MinimumAlignmentOnly = false,
 	bool PadWithZero = true,
 	size_t BufferSize = 65536,
-	size_t MaxWriteSize = 4194304>
+	size_t MaxWriteSize = 4194304,
+	bool RootFirst = true>
 class JsopPackedFile {
 public:
 	typedef ValueType value_type;
@@ -139,11 +140,18 @@ public:
 
 	bool start(int handle) noexcept {
 		if (handle >= 0) {
-			WrittenSize = sizeof(value_type);
-			WrittenBufferSize = 0;
-			FreeBufferSize = BufferSize - sizeof(value_type);
-			Handle = handle;
-			ValueBuffer[0].setNull();
+			if (RootFirst) {
+				WrittenSize = sizeof(value_type);
+				WrittenBufferSize = 0;
+				FreeBufferSize = BufferSize - sizeof(value_type);
+				Handle = handle;
+				ValueBuffer[0].setNull();
+			} else {
+				WrittenSize = 0;
+				WrittenBufferSize = 0;
+				FreeBufferSize = BufferSize;
+				Handle = handle;
+			}
 			return true;
 		} else {
 			return false;
@@ -180,8 +188,8 @@ public:
 	}
 };
 
-template <class ValueType, bool MinimumAlignmentOnly, bool PadWithZero, size_t BufferSize, size_t MaxWriteSize>
-bool JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, MaxWriteSize>::writeData(const void *src, size_t n) noexcept {
+template <class ValueType, bool MinimumAlignmentOnly, bool PadWithZero, size_t BufferSize, size_t MaxWriteSize, bool RootFirst>
+bool JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, MaxWriteSize, RootFirst>::writeData(const void *src, size_t n) noexcept {
 	auto free_buffer_size = FreeBufferSize;
 	if (free_buffer_size >= n) {
 		memcpy(Buffer + (BufferSize - free_buffer_size), src, n);
@@ -246,10 +254,35 @@ bool JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, Ma
 	}
 }
 
-template <class ValueType, bool MinimumAlignmentOnly, bool PadWithZero, size_t BufferSize, size_t MaxWriteSize>
-bool JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, MaxWriteSize>::finish(value_type value) noexcept {
+template <class ValueType, bool MinimumAlignmentOnly, bool PadWithZero, size_t BufferSize, size_t MaxWriteSize, bool RootFirst>
+bool JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, MaxWriteSize, RootFirst>::finish(value_type value) noexcept {
 	auto handle = Handle;
 	bool ok;
+
+	if (!RootFirst) {
+		constexpr size_t alignment = (MinimumAlignmentOnly || sizeof(value_type) <= MINIMUM_ALIGNMENT) ? MINIMUM_ALIGNMENT : sizeof(value_type);
+		static_assert((alignment & (alignment - 1)) == 0, "(alignment & (alignment - 1)) == 0");
+
+		auto free_buffer_size = FreeBufferSize;
+		size_t padding_size = free_buffer_size % alignment;
+		size_type byte_offset = WrittenSize + padding_size;
+		size_t aligned_free_buffer_size = (free_buffer_size / alignment) * alignment;
+
+		//Adds zero padding if necessary
+		if (alignment > 1 && PadWithZero) {
+			for (auto start = Buffer + (BufferSize - free_buffer_size), end = Buffer + (BufferSize - aligned_free_buffer_size); start < end; ++start) {
+				*start = 0;
+			}
+		}
+		FreeBufferSize = aligned_free_buffer_size;
+
+		//Write the data
+		if (writeSmallData<value_type, alignment>(value)) {
+			WrittenSize = byte_offset + sizeof(value_type);
+		} else {
+			return false;
+		}
+	}
 
 	//Write the remaining bytes in the buffer
 	assert(FreeBufferSize <= BufferSize);
@@ -263,7 +296,7 @@ bool JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, Ma
 		ok = true;
 	}
 	//Write the root value
-	if (ok) {
+	if (ok && RootFirst) {
 		ok = lseek64(handle, 0, SEEK_SET) == 0;
 		if (ok) {
 			ok = writeAll(handle, &value, sizeof(value)) >= 0;
@@ -274,10 +307,11 @@ bool JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, Ma
 	return ok;
 }
 
-template <class ValueType, bool MinimumAlignmentOnly, bool PadWithZero, size_t BufferSize, size_t MaxWriteSize>
+template <class ValueType, bool MinimumAlignmentOnly, bool PadWithZero, size_t BufferSize, size_t MaxWriteSize, bool RootFirst>
 template <JsopPackedValueType type, typename T>
-auto JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, MaxWriteSize>::writeValue(T value) noexcept -> value_type {
+auto JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, MaxWriteSize, RootFirst>::writeValue(T value) noexcept -> value_type {
 	constexpr size_t alignment = (MinimumAlignmentOnly || sizeof(T) <= MINIMUM_ALIGNMENT) ? MINIMUM_ALIGNMENT : sizeof(T);
+	static_assert((alignment & (alignment - 1)) == 0, "(alignment & (alignment - 1)) == 0");
 
 	auto free_buffer_size = FreeBufferSize;
 	size_t padding_size = free_buffer_size % alignment;
@@ -300,8 +334,8 @@ auto JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, Ma
 	return value_type::makeNull();
 }
 
-template <class ValueType, bool MinimumAlignmentOnly, bool PadWithZero, size_t BufferSize, size_t MaxWriteSize>
-auto JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, MaxWriteSize>::writeSmallString(size_t n, const char *s) noexcept -> value_type {
+template <class ValueType, bool MinimumAlignmentOnly, bool PadWithZero, size_t BufferSize, size_t MaxWriteSize, bool RootFirst>
+auto JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, MaxWriteSize, RootFirst>::writeSmallString(size_t n, const char *s) noexcept -> value_type {
 	static_assert(SmallString::sizeofHeader() == sizeof(typename SmallString::size_type), "value_type::SmallString::sizeofHeader() == sizeof(typename value_type::SmallString::size_type)");
 
 	constexpr size_t alignment = (MinimumAlignmentOnly || alignof(typename value_type::SmallString) <= MINIMUM_ALIGNMENT) ? MINIMUM_ALIGNMENT : alignof(typename value_type::SmallString);
@@ -329,8 +363,8 @@ auto JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, Ma
 	return value_type::makeNull();
 }
 
-template <class ValueType, bool MinimumAlignmentOnly, bool PadWithZero, size_t BufferSize, size_t MaxWriteSize>
-auto JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, MaxWriteSize>::writeString(size_t n, const char *s) noexcept -> value_type {
+template <class ValueType, bool MinimumAlignmentOnly, bool PadWithZero, size_t BufferSize, size_t MaxWriteSize, bool RootFirst>
+auto JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, MaxWriteSize, RootFirst>::writeString(size_t n, const char *s) noexcept -> value_type {
 	static_assert(String::sizeofHeader() == sizeof(typename String::size_type), "String::sizeofHeader() == sizeof(String::size_type)");
 
 	constexpr size_t alignment = (MinimumAlignmentOnly || alignof(String) <= MINIMUM_ALIGNMENT) ? MINIMUM_ALIGNMENT : alignof(String);
@@ -358,8 +392,8 @@ auto JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, Ma
 	return value_type::makeNull();
 }
 
-template <class ValueType, bool MinimumAlignmentOnly, bool PadWithZero, size_t BufferSize, size_t MaxWriteSize>
-auto JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, MaxWriteSize>::writeSizeData(JsopPackedValueType type, size_t n, size_t number_of_bytes, const void *data) noexcept -> value_type {
+template <class ValueType, bool MinimumAlignmentOnly, bool PadWithZero, size_t BufferSize, size_t MaxWriteSize, bool RootFirst>
+auto JsopPackedFile<ValueType, MinimumAlignmentOnly, PadWithZero, BufferSize, MaxWriteSize, RootFirst>::writeSizeData(JsopPackedValueType type, size_t n, size_t number_of_bytes, const void *data) noexcept -> value_type {
 	constexpr size_t alignment = (MinimumAlignmentOnly || alignof(size_type) <= MINIMUM_ALIGNMENT) ? MINIMUM_ALIGNMENT : alignof(size_type);
 
 	auto free_buffer_size = FreeBufferSize;
