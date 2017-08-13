@@ -363,7 +363,7 @@ bool JsopParser<H>::parseEndOfStream() noexcept(H::NoExceptions) {
 		goto cleanup_on_error;
 #endif
 
-#ifdef JSOP_PARSE_INFINITY
+#if defined(JSOP_PARSE_INFINITY) && !defined(JSOP_PARSE_STRICT_INFINITY_AND_NAN)
 	case LiteralInf:
 		if (makeInfinity(Negate)) {
 			break;
@@ -719,7 +719,9 @@ state_start:
 
 #ifdef JSOP_PARSE_INFINITY
 		case 'I':
+#ifndef JSOP_PARSE_STRICT_INFINITY_AND_NAN
 		case 'i':
+#endif
 			Negate = false;
 			goto state_literal_i;
 #endif
@@ -812,7 +814,9 @@ state_negative_value:
 
 #ifdef JSOP_PARSE_INFINITY
 		case 'I':
+#ifndef JSOP_PARSE_STRICT_INFINITY_AND_NAN
 		case 'i':
+#endif
 			goto state_literal_i;
 #endif
 
@@ -2143,7 +2147,7 @@ state_binary_exponent:
 #endif
 
 state_literal_f:
-	if (reinterpret_cast<uintptr_t>(end) - reinterpret_cast<uintptr_t>(start) >= 4) {
+	if (reinterpret_cast<uintptr_t>(end) - reinterpret_cast<uintptr_t>(start) >= sizeof(uint32_t)) {
 		uint32_t fragment;
 		memcpy(&fragment, start, sizeof(fragment));
 		if (fragment == 0x65736c61) {
@@ -2217,11 +2221,40 @@ state_literal_fals:
 
 #ifdef JSOP_PARSE_INFINITY
 state_literal_i:
+#ifdef JSOP_PARSE_STRICT_INFINITY_AND_NAN
+	if (reinterpret_cast<uintptr_t>(end) - reinterpret_cast<uintptr_t>(start) >= sizeof(uint64_t)) {
+#if JSOP_WORD_SIZE == 64
+		uint64_t fragment;
+		memcpy(&fragment, start, sizeof(fragment));
+		if ((fragment & UINT64_C(0xFFFFFFFFFFFFFF)) == UINT64_C(0x7974696e69666e)) {
+			start += sizeof(fragment) - 1;
+			if (makeInfinity(Negate)) {
+				JSOP_PARSER_PUSH_VALUE_EPILOGUE;
+			}
+		}
+#else
+		uint32_t fragment;
+		memcpy(&fragment, start, sizeof(fragment));
+		if (fragment == 0x6e69666e) {
+			memcpy(&fragment, start + sizeof(fragment), sizeof(fragment));
+			if ((fragment & 0xFFFFFF) == 0x797469) {
+				start += 2 * sizeof(fragment) - 1;
+				if (makeInfinity(Negate)) {
+					JSOP_PARSER_PUSH_VALUE_EPILOGUE;
+				}
+			}
+		}
+#endif
+		goto cleanup_on_error;
+	} else
+#endif
 	if (start != end) {
 		ch = *start;
 		++start;
 		switch (ch) {
+#ifndef JSOP_PARSE_STRICT_INFINITY_AND_NAN
 		case 'N':
+#endif
 		case 'n':
 			goto state_literal_in;
 
@@ -2237,7 +2270,9 @@ state_literal_in:
 		ch = *start;
 		++start;
 		switch (ch) {
+#ifndef JSOP_PARSE_STRICT_INFINITY_AND_NAN
 		case 'F':
+#endif
 		case 'f':
 			goto state_literal_inf;
 
@@ -2253,10 +2288,13 @@ state_literal_inf:
 		ch = *start;
 		++start;
 		switch (ch) {
+#ifndef JSOP_PARSE_STRICT_INFINITY_AND_NAN
 		case 'I':
+#endif
 		case 'i':
 			goto state_literal_infi;
 
+#ifndef JSOP_PARSE_STRICT_INFINITY_AND_NAN
 		case ',':
 			if (!H::inTop()) {
 				if (makeInfinity(Negate)) {
@@ -2297,6 +2335,7 @@ state_literal_inf:
 			}
 			goto cleanup_on_error;
 #endif
+#endif
 
 		default:
 			goto cleanup_on_error;
@@ -2310,7 +2349,9 @@ state_literal_infi:
 		ch = *start;
 		++start;
 		switch (ch) {
+#ifndef JSOP_PARSE_STRICT_INFINITY_AND_NAN
 		case 'N':
+#endif
 		case 'n':
 			goto state_literal_infin;
 
@@ -2326,7 +2367,9 @@ state_literal_infin:
 		ch = *start;
 		++start;
 		switch (ch) {
+#ifndef JSOP_PARSE_STRICT_INFINITY_AND_NAN
 		case 'I':
+#endif
 		case 'i':
 			goto state_literal_infini;
 
@@ -2342,7 +2385,9 @@ state_literal_infini:
 		ch = *start;
 		++start;
 		switch (ch) {
+#ifndef JSOP_PARSE_STRICT_INFINITY_AND_NAN
 		case 'T':
+#endif
 		case 't':
 			goto state_literal_infinit;
 
@@ -2358,7 +2403,9 @@ state_literal_infinit:
 		ch = *start;
 		++start;
 		switch (ch) {
+#ifndef JSOP_PARSE_STRICT_INFINITY_AND_NAN
 		case 'Y':
+#endif
 		case 'y':
 			if (makeInfinity(Negate)) {
 				JSOP_PARSER_PUSH_VALUE_EPILOGUE;
@@ -2375,11 +2422,26 @@ state_literal_infinit:
 
 #ifdef JSOP_PARSE_NAN
 state_literal_N:
+#ifdef JSOP_PARSE_STRICT_INFINITY_AND_NAN
+	if (reinterpret_cast<uintptr_t>(end) - reinterpret_cast<uintptr_t>(start) >= sizeof(uint16_t)) {
+		uint16_t fragment;
+		memcpy(&fragment, start, sizeof(fragment));
+		if (fragment == 0x4e61) {
+			start += sizeof(fragment);
+			if (H::makeDouble(NAN)) {
+				JSOP_PARSER_PUSH_VALUE_EPILOGUE;
+			}
+		}
+		goto cleanup_on_error;
+	} else
+#endif
 	if (start != end) {
 		ch = *start;
 		++start;
 		switch (ch) {
+#ifndef JSOP_PARSE_STRICT_INFINITY_AND_NAN
 		case 'A':
+#endif
 		case 'a':
 			goto state_literal_na;
 
@@ -2392,11 +2454,24 @@ state_literal_N:
 #endif
 
 state_literal_n:
+#ifdef JSOP_PARSE_STRICT_INFINITY_AND_NAN
+	if (reinterpret_cast<uintptr_t>(end) - reinterpret_cast<uintptr_t>(start) >= sizeof(uint32_t)) {
+		uint32_t fragment;
+		memcpy(&fragment, start, sizeof(fragment));
+		if ((fragment & 0xFFFFFF) == 0x6c6c75) {
+			start += sizeof(fragment) - 1;
+			if (H::makeNull()) {
+				JSOP_PARSER_PUSH_VALUE_EPILOGUE;
+			}
+		}
+		goto cleanup_on_error;
+	} else
+#endif
 	if (start != end) {
 		ch = *start;
 		++start;
 		switch (ch) {
-#ifdef JSOP_PARSE_NAN
+#if defined(JSOP_PARSE_NAN) && !defined(JSOP_PARSE_STRICT_INFINITY_AND_NAN)
 		case 'A':
 		case 'a':
 			goto state_literal_na;
@@ -2419,7 +2494,9 @@ state_literal_na:
 		++start;
 		switch (ch) {
 		case 'N':
+#ifndef JSOP_PARSE_STRICT_INFINITY_AND_NAN
 		case 'n':
+#endif
 			if (H::makeDouble(NAN)) {
 				JSOP_PARSER_PUSH_VALUE_EPILOGUE;
 			}
@@ -2467,7 +2544,7 @@ state_literal_nul:
 	}
 
 state_literal_t:
-	if (reinterpret_cast<uintptr_t>(end) - reinterpret_cast<uintptr_t>(start) >= 4) {
+	if (reinterpret_cast<uintptr_t>(end) - reinterpret_cast<uintptr_t>(start) >= sizeof(uint32_t)) {
 		uint32_t fragment;
 		memcpy(&fragment, start, sizeof(fragment));
 		fragment &= 0xFFFFFF;
