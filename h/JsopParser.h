@@ -23,7 +23,7 @@
 #include "JsopMemoryPools.h"
 #include "JsopStringBuffer.h"
 
-#ifdef JSOP_STRING_MULTI_BYTE_COPY
+#ifdef JSOP_PARSE_STRING_MULTI_BYTE_COPY
 
 #ifdef __SSE2__
 
@@ -390,7 +390,7 @@ cleanup_on_error:
 
 template <typename H>
 bool JsopParser<H>::parse(const char *start, const char *end) noexcept(H::NoExceptions) {
-#ifdef JSOP_STRING_MULTI_BYTE_COPY
+#ifdef JSOP_PARSE_STRING_MULTI_BYTE_COPY
 
 #ifdef __SSE2__
 	const auto forward_slash_x16 = _mm_set1_epi8('\\'), quote_x16 = _mm_set1_epi8('"'), space_x16 = _mm_set1_epi8(0x20);
@@ -2629,7 +2629,7 @@ state_end_of_stream:
 	}
 
 state_string_chars:
-#ifdef JSOP_STRING_MULTI_BYTE_COPY
+#ifdef JSOP_PARSE_STRING_MULTI_BYTE_COPY
 
 #ifdef __SSE2__
 	static_assert(JSOP_STRING_BUFFER_MIN_SIZE >= 16, "JSOP_STRING_BUFFER_MIN_SIZE >= 16");
@@ -3920,13 +3920,8 @@ state_key_values:
 			goto cleanup_on_error;
 #else
 			Buffer.clear();
-			if (ch < 0x80) {
-				if (jsop_code_point_ascii_is_id_start(ch)) {
-					if (Buffer.append(ch)) {
-						goto state_unquoted_key_id_continue;
-					}
-				}
-				goto cleanup_on_error;
+			if (jsop_code_point_is_ascii_id_start(ch)) {
+				JSOP_PARSER_APPEND_CHAR(state_unquoted_key_id_continue);
 			} else {
 				ParsingIdContinue = false;
 				switch (ch) {
@@ -4074,58 +4069,169 @@ state_key_values_separator_or_close:
 
 #ifdef JSOP_PARSE_UNQUOTED_KEY
 state_unquoted_key_id_continue:
+
+#ifdef JSOP_PARSE_UNQUOTED_KEY_MULTI_BYTE_COPY
+
+#if JSOP_WORD_SIZE == 64
+	static_assert(JSOP_STRING_BUFFER_MIN_SIZE >= sizeof(uint64_t), "JSOP_STRING_BUFFER_MIN_SIZE >= sizeof(uint64_t)");
+	if (reinterpret_cast<uintptr_t>(end) - reinterpret_cast<uintptr_t>(start) >= sizeof(uint64_t)) {
+		if (Buffer.resize_if(sizeof(uint64_t))) {
+			uint64_t fragment;
+			memcpy(&fragment, start, sizeof(fragment));
+
+			auto new_end = Buffer.getEnd();
+			memcpy(new_end, &fragment, sizeof(fragment));
+
+			ch = fragment & 0xFF;
+			if (jsop_code_point_is_ascii_id_continue(ch)) {
+				ch = (fragment >> 8) & 0xFF;
+				if (jsop_code_point_is_ascii_id_continue(ch)) {
+					ch = (fragment >> 16) & 0xFF;
+					if (jsop_code_point_is_ascii_id_continue(ch)) {
+						ch = (fragment >> 24) & 0xFF;
+						if (jsop_code_point_is_ascii_id_continue(ch)) {
+							ch = (fragment >> 32) & 0xFF;
+							if (jsop_code_point_is_ascii_id_continue(ch)) {
+								ch = (fragment >> 40) & 0xFF;
+								if (jsop_code_point_is_ascii_id_continue(ch)) {
+									ch = (fragment >> 48) & 0xFF;
+									if (jsop_code_point_is_ascii_id_continue(ch)) {
+										ch = (fragment >> 56) & 0xFF;
+										start += sizeof(fragment);
+										if (jsop_code_point_is_ascii_id_continue(ch)) {
+											Buffer.setEnd(new_end + sizeof(fragment));
+											goto state_unquoted_key_id_continue;
+										} else {
+											Buffer.setEnd(new_end + 7);
+											goto action_unquoted_key_id_continue_test_special_chars;
+										}
+									} else {
+										Buffer.setEnd(new_end + 6);
+										start += 7;
+										goto action_unquoted_key_id_continue_test_special_chars;
+									}
+								} else {
+									Buffer.setEnd(new_end + 5);
+									start += 6;
+									goto action_unquoted_key_id_continue_test_special_chars;
+								}
+							} else {
+								Buffer.setEnd(new_end + 4);
+								start += 5;
+								goto action_unquoted_key_id_continue_test_special_chars;
+							}
+						} else {
+							Buffer.setEnd(new_end + 3);
+							start += 4;
+							goto action_unquoted_key_id_continue_test_special_chars;
+						}
+					} else {
+						Buffer.setEnd(new_end + 2);
+						start += 3;
+						goto action_unquoted_key_id_continue_test_special_chars;
+					}
+				} else {
+					Buffer.setEnd(new_end + 1);
+					start += 2;
+					goto action_unquoted_key_id_continue_test_special_chars;
+				}
+			} else {
+				++start;
+				goto action_unquoted_key_id_continue_test_special_chars;
+			}
+		} else {
+			goto cleanup_on_error;
+		}
+	}
+#else
+	static_assert(JSOP_STRING_BUFFER_MIN_SIZE >= sizeof(uint32_t), "JSOP_STRING_BUFFER_MIN_SIZE >= sizeof(uint32_t)");
+	if (reinterpret_cast<uintptr_t>(end) - reinterpret_cast<uintptr_t>(start) >= sizeof(uint32_t)) {
+		if (Buffer.resize_if(sizeof(uint32_t))) {
+			uint32_t fragment;
+			memcpy(&fragment, start, sizeof(fragment));
+
+			auto new_end = Buffer.getEnd();
+			memcpy(new_end, &fragment, sizeof(fragment));
+
+			ch = fragment & 0xFF;
+			if (jsop_code_point_is_ascii_id_continue(ch)) {
+				ch = (fragment >> 8) & 0xFF;
+				if (jsop_code_point_is_ascii_id_continue(ch)) {
+					ch = (fragment >> 16) & 0xFF;
+					if (jsop_code_point_is_ascii_id_continue(ch)) {
+						ch = (fragment >> 24) & 0xFF;
+						start += sizeof(fragment);
+						if (jsop_code_point_is_ascii_id_continue(ch)) {
+							Buffer.setEnd(new_end + sizeof(fragment));
+							goto state_unquoted_key_id_continue;
+						} else {
+							Buffer.setEnd(new_end + 3);
+							goto action_unquoted_key_id_continue_test_special_chars;
+						}
+					} else {
+						Buffer.setEnd(new_end + 2);
+						start += 3;
+						goto action_unquoted_key_id_continue_test_special_chars;
+					}
+				} else {
+					Buffer.setEnd(new_end + 1);
+					start += 2;
+					goto action_unquoted_key_id_continue_test_special_chars;
+				}
+			} else {
+				++start;
+				goto action_unquoted_key_id_continue_test_special_chars;
+			}
+		} else {
+			goto cleanup_on_error;
+		}
+	}
+#endif
+
+#endif
+
+action_unquoted_key_id_continue_x1:
 	if (start != end) {
 		ch = *start;
 		++start;
-		if (ch < 0x80) {
-			if (jsop_code_point_ascii_is_id_continue(ch)) {
-				if (Buffer.append(ch)) {
-					goto state_unquoted_key_id_continue;
-				} else {
-					goto cleanup_on_error;
+		if (jsop_code_point_is_ascii_id_continue(ch)) {
+			JSOP_PARSER_APPEND_CHAR(action_unquoted_key_id_continue_x1);
+		} else {
+action_unquoted_key_id_continue_test_special_chars:
+			switch (ch) {
+			case ':':
+				assert(!H::inTop());
+				if ((!H::requireNullTerminator() || Buffer.append('\0')) && H::makeString(Buffer.getStart(), Buffer.getEnd(), true)) {
+					goto state_values;
 				}
-			} else {
-				switch (ch) {
-				case ':':
-					assert(!H::inTop());
-					if ((!H::requireNullTerminator() || Buffer.append('\0')) && H::makeString(Buffer.getStart(), Buffer.getEnd(), true)) {
-						goto state_values;
-					}
-					goto cleanup_on_error;
+				goto cleanup_on_error;
 
-				case '\n':
-					++cur_line;
-					cur_line_start = start;
-				case ' ':
-				case '\t':
-				case '\r':
-					assert(!H::inTop());
-					if ((!H::requireNullTerminator() || Buffer.append('\0')) && H::makeString(Buffer.getStart(), Buffer.getEnd(), true)) {
-						goto state_key_separator;
-					}
-					goto cleanup_on_error;
+			case '\n':
+				++cur_line;
+				cur_line_start = start;
+			case ' ':
+			case '\t':
+			case '\r':
+				assert(!H::inTop());
+				if ((!H::requireNullTerminator() || Buffer.append('\0')) && H::makeString(Buffer.getStart(), Buffer.getEnd(), true)) {
+					goto state_key_separator;
+				}
+				goto cleanup_on_error;
 
 #ifdef JSOP_PARSE_COMMENT
-				case '/':
-					assert(!H::inTop());
-					if ((!H::requireNullTerminator() || Buffer.append('\0')) && H::makeString(Buffer.getStart(), Buffer.getEnd(), true)) {
-						LastState = KeySeparator;
-						goto state_single_or_multi_line_comment;
-					}
-					goto cleanup_on_error;
+			case '/':
+				assert(!H::inTop());
+				if ((!H::requireNullTerminator() || Buffer.append('\0')) && H::makeString(Buffer.getStart(), Buffer.getEnd(), true)) {
+					LastState = KeySeparator;
+					goto state_single_or_multi_line_comment;
+				}
+				goto cleanup_on_error;
 #endif
 
-				case '\\':
-					ParsingIdContinue = true;
-					goto state_unquoted_key_escaped_char;
+			case '\\':
+				ParsingIdContinue = true;
+				goto state_unquoted_key_escaped_char;
 
-				default:
-					goto cleanup_on_error;
-				}
-			}
-		} else {
-			ParsingIdContinue = true;
-			switch (ch) {
 			//2-byte utf-8 sequences
 			case 0xC2:
 			case 0xC3:
@@ -4157,10 +4263,12 @@ state_unquoted_key_id_continue:
 			case 0xDD:
 			case 0xDE:
 			case 0xDF:
+				ParsingIdContinue = true;
 				CurrentUtf32 = (ch - 0xC0) * 64;
 				JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_trail_1);
 
 			case 0xE0:
+				ParsingIdContinue = true;
 				JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_0xE0);
 
 			case 0xE1:
@@ -4177,22 +4285,27 @@ state_unquoted_key_id_continue:
 			case 0xEC:
 			case 0xEE:
 			case 0xEF:
+				ParsingIdContinue = true;
 				CurrentUtf32 = (ch - 0xE0) * 4096;
 				JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_trail_2);
 
 			case 0xED:
+				ParsingIdContinue = true;
 				JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_0xED);
 
 			case 0xF0:
+				ParsingIdContinue = true;
 				JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_0xF0);
 
 			case 0xF1:
 			case 0xF2:
 			case 0xF3:
+				ParsingIdContinue = true;
 				CurrentUtf32 = (ch - 0xF0) * 262144;
 				JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_trail_3);
 
 			case 0xF4:
+				ParsingIdContinue = true;
 				JSOP_PARSER_APPEND_CHAR(state_unquoted_key_utf8_0xF4);
 
 			default:
