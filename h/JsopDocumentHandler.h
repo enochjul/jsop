@@ -260,7 +260,6 @@ public:
 			assert((n % 2) == 0);
 			new_object_size = n / 2;
 			if (new_object_size <= JsopValue::MAX_SIZE) {
-				auto values_start = StackStart + PrevStackSize;
 				new_values = nullptr;
 				auto stack_size = values_start[-1].getStackSize();
 				if (JSOP_LIKELY(n > 0)) {

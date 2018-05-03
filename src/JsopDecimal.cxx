@@ -2438,7 +2438,7 @@ JSOP_INLINE double jsop_make_subnormal_double(uint32_t mantissa_low, uint32_t ma
 
 double jsop_decimal_to_double(uint64_t significand, int exponent, bool negative) noexcept {
 #if JSOP_WORD_SIZE == 64
-	uint64_t remainder, mantissa, difference;
+	uint64_t remainder, mantissa;
 	int mantissa_bits, remainder_bits, final_exponent, reciprocal_exponent;
 	unsigned abs_exponent;
 
@@ -2564,6 +2564,7 @@ double jsop_decimal_to_double(uint64_t significand, int exponent, bool negative)
 					assert(mantissa >= (UINT64_C(1) << (DBL_MANT_DIG + 1)) && mantissa < (UINT64_C(1) << (DBL_MANT_DIG + 2)));
 					if (abs_exponent < jsop_get_array_size(JsopSmallPowersOfFive)) {
 						auto denominator = JsopSmallPowersOfFive[abs_exponent];
+						uint64_t difference;
 						remainder_bits = reciprocal_exponent - remainder_bits;
 						if (remainder_bits > 0) {
 							uint64_t numerator_low, numerator_high;
