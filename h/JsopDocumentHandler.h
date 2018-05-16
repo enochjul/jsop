@@ -207,7 +207,7 @@ public:
 		JsopValue *new_values;
 		size_t n;
 
-		assert((StackEnd - StackStart) > 0 && (StackEnd - StackStart) >= PrevStackSize && PrevStackSize > 0);
+		assert((StackEnd - StackStart) > 0 && static_cast<uintptr_t>(StackEnd - StackStart) >= PrevStackSize && PrevStackSize > 0);
 
 		auto values_start = StackStart + PrevStackSize;
 		if (JSOP_LIKELY(values_start[-1].getType() == JsopValue::ArrayType)) {
@@ -252,7 +252,7 @@ public:
 		JsopValue *new_values;
 		size_t n, new_object_size;
 
-		assert((StackEnd - StackStart) > 0 && (StackEnd - StackStart) >= PrevStackSize && PrevStackSize > 0);
+		assert((StackEnd - StackStart) > 0 && static_cast<uintptr_t>(StackEnd - StackStart) >= PrevStackSize && PrevStackSize > 0);
 
 		auto values_start = StackStart + PrevStackSize;
 		if (JSOP_LIKELY(values_start[-1].getType() == JsopValue::ObjectType)) {

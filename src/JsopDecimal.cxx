@@ -2092,7 +2092,7 @@ JSOP_INLINE void jsop_uint_multiply_2x2(T *d0, T *d1, T *d2, T *d3, T a0, T a1, 
 //! Shifts the given double width integer left by n bits, and returns the result as a triple width integer
 template <typename T>
 JSOP_INLINE void jsop_uint_shift_left_x2(T *d0, T *d1, T *d2, T value_low, T value_high, int n) noexcept {
-	assert(n > 0 && n < sizeof(T) * CHAR_BIT);
+	assert(n > 0 && static_cast<unsigned>(n) < sizeof(T) * CHAR_BIT);
 
 	*d2 = value_high >> (sizeof(T) * CHAR_BIT - n);
 	*d1 = (value_high << n) | (value_low >> (sizeof(T) * CHAR_BIT - n));
@@ -2102,7 +2102,7 @@ JSOP_INLINE void jsop_uint_shift_left_x2(T *d0, T *d1, T *d2, T value_low, T val
 //! Shifts the given double width integer left by n bits, and returns the result as a double width integer
 template <typename T>
 JSOP_INLINE void jsop_uint_shift_left_x2(T *low, T *high, T value_low, T value_high, int n) noexcept {
-	assert(n > 0 && n < sizeof(T) * CHAR_BIT);
+	assert(n > 0 && static_cast<unsigned>(n) < sizeof(T) * CHAR_BIT);
 
 	*high = (value_high << n) | (value_low >> (sizeof(T) * CHAR_BIT - n));
 	*low = value_low << n;
@@ -2111,7 +2111,7 @@ JSOP_INLINE void jsop_uint_shift_left_x2(T *low, T *high, T value_low, T value_h
 //! Shifts the given value left by n bits, and returns the result as a double width integer
 template <typename T>
 JSOP_INLINE void jsop_uint_shift_left_x1(T *low, T *high, T value, int n) noexcept {
-	assert(n > 0 && n < sizeof(T) * CHAR_BIT * 2);
+	assert(n > 0 && static_cast<unsigned>(n) < sizeof(T) * CHAR_BIT * 2);
 
 	if (static_cast<unsigned>(n) >= sizeof(T) * CHAR_BIT) {
 		*high = value << (n - sizeof(T) * CHAR_BIT);
@@ -2131,7 +2131,7 @@ JSOP_INLINE void jsop_uint_shift_left_x2_assign(T *low, T *high, int n) noexcept
 //! Shifts the given double width integer right by n bits, and returns the result as a double width integer
 template <typename T>
 JSOP_INLINE void jsop_uint_shift_right_x2(T *low, T *high, T value_low, T value_high, int n) noexcept {
-	assert(n > 0 && n < sizeof(T) * CHAR_BIT);
+	assert(n > 0 && static_cast<unsigned>(n) < sizeof(T) * CHAR_BIT);
 
 	*low = (value_high << (sizeof(T) * CHAR_BIT - n)) | (value_low >> n);
 	*high = value_high >> n;
