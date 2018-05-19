@@ -14,6 +14,7 @@
 #define JSOP_CODE_POINT_IDS_ASCII_BITSET_MASK 0x2
 
 extern const uint8_t JsopCodePointASCIIBitset[];
+extern const uint8_t JsopCodePointHexDigitValue[];
 
 //! Checks if the given code point is allowed as a part of an identifier
 bool jsop_code_point_is_id_continue(uint32_t codepoint) noexcept;

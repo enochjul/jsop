@@ -49,6 +49,50 @@ JSOP_INLINE JsopCountTrailingZerosReturnType<uint32_t> jsop_count_trailing_zeros
 
 #endif
 
+#ifdef __amd64__
+
+//For some reason gcc does not convert multiply by 10 to use lea instructions in nested if statements that are more than a few levels deep,
+//so manually insert the lea instructions with inline assembly
+JSOP_INLINE uint64_t jsop_mul10_add_64(uint64_t value, uint64_t a) noexcept {
+		uint64_t value_x5, value_x10;
+        asm ("lea (%1, %1, 4), %0"
+                : "=r" (value_x5)
+                : "r" (value)
+                : );
+        asm ("lea (%2, %1, 2), %0"
+                : "=r" (value_x10)
+                : "r" (value_x5), "r" (a)
+                : );
+        return value_x10;
+}
+
+//This is for the case where the output value is known to be no more than 32-bits, and constrains the output operand to be 32-bits as the upper
+//parts of the register is automatically zeroed
+JSOP_INLINE uint64_t jsop_mul10_add_32(uint64_t value, uint64_t a) noexcept {
+		uint64_t value_x5, value_x10;
+        asm ("lea (%1, %1, 4), %k0"
+                : "=r" (value_x5)
+                : "r" (value)
+                : );
+        asm ("lea (%2, %1, 2), %k0"
+                : "=r" (value_x10)
+                : "r" (value_x5), "r" (a)
+                : );
+        return value_x10;
+}
+
+#else
+
+JSOP_INLINE uint64_t jsop_mul10_add_64(uint64_t value, unsigned a) noexcept {
+	return value * 10 + a;
+}
+
+JSOP_INLINE uint64_t jsop_mul10_add_32(uint64_t value, unsigned a) noexcept {
+	return value * 10 + a;
+}
+
+#endif
+
 class JsopDocument;
 class JsopValue;
 
@@ -169,7 +213,9 @@ class JsopParser final : public H {
 	int CurrentSpecifiedExponent;
 	unsigned CurrentUtf32;
 	State LastState;
+#ifdef JSOP_PARSER_LOCATION
 	unsigned Line, Column;
+#endif
 	bool Negate;
 	bool NegateSpecifiedExponent;
 	bool ParsingKey;
@@ -205,8 +251,10 @@ public:
 	JSOP_INLINE bool start(A && ... args) noexcept(H::NoExceptions) {
 		if (Buffer.initialized() && H::start(std::forward<A>(args) ...)) {
 			CurrentState = Start;
+#ifdef JSOP_PARSER_LOCATION
 			Line = 1;
 			Column = 1;
+#endif
 			ParsingKey = false;
 #ifndef JSOP_PARSE_TRAILING_COMMA
 			CommaBeforeBrace = false;
@@ -302,10 +350,16 @@ public:
 	} \
 	goto cleanup_on_error
 
+#ifdef JSOP_PARSER_LOCATION
 #define JSOP_PARSER_RETURN(state) \
 	CurrentState = state; \
 	Line = cur_line, Column = start - cur_line_start + 1; \
 	return true
+#else
+#define JSOP_PARSER_RETURN(state) \
+	CurrentState = state; \
+	return true
+#endif
 
 template <typename H>
 bool JsopParser<H>::parseEndOfStream() noexcept(H::NoExceptions) {
@@ -401,12 +455,17 @@ bool JsopParser<H>::parse(const char *start, const char *end) noexcept(H::NoExce
 #ifndef JSOP_IGNORE_OVERFLOW
 	uint64_t old_integer;
 #endif
+#ifdef JSOP_PARSER_LOCATION
 	const char *cur_line_start;
 	unsigned cur_line;
+#endif
+	unsigned digit;
 	unsigned char ch;
 
+#ifdef JSOP_PARSER_LOCATION
 	cur_line = Line;
 	cur_line_start = start - Column + 1;
+#endif
 
 dispatch_state:
 	switch (CurrentState) {
@@ -754,8 +813,10 @@ state_start:
 			goto cleanup_on_error;
 
 		case '\n':
+#ifdef JSOP_PARSER_LOCATION
 			++cur_line;
 			cur_line_start = start;
+#endif
 		case ' ':
 		case '\t':
 		case '\r':
@@ -821,8 +882,10 @@ state_negative_value:
 #endif
 
 		case '\n':
+#ifdef JSOP_PARSER_LOCATION
 			++cur_line;
 			cur_line_start = start;
+#endif
 		case ' ':
 		case '\t':
 		case '\r':
@@ -892,8 +955,10 @@ state_zero:
 			goto cleanup_on_error;
 
 		case '\n':
+#ifdef JSOP_PARSER_LOCATION
 			++cur_line;
 			cur_line_start = start;
+#endif
 		case ' ':
 		case '\t':
 		case '\r':
@@ -918,72 +983,84 @@ state_zero:
 	}
 
 action_number_1_non_zero_digit:
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 	if (reinterpret_cast<uintptr_t>(end) - reinterpret_cast<uintptr_t>(start) >= 19) {
-#else
-	if (reinterpret_cast<uintptr_t>(end) - reinterpret_cast<uintptr_t>(start) >= 18) {
-#endif
 		auto current_integer = CurrentInteger;
 		ch = start[0];
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 		auto old_start = start + 1;
 		auto token_end = old_start + 17;
 		CurrentExponent = 0;
-#endif
-		if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_32(current_integer, digit);
 			ch = start[1];
-			if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-				current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+			digit = static_cast<unsigned>(ch) - '0';
+			if (JSOP_LIKELY(digit < 10)) {
+				current_integer = jsop_mul10_add_32(current_integer, digit);
 				ch = start[2];
-				if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-					current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+				digit = static_cast<unsigned>(ch) - '0';
+				if (JSOP_LIKELY(digit < 10)) {
+					current_integer = jsop_mul10_add_32(current_integer, digit);
 					ch = start[3];
-					if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-						current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+					digit = static_cast<unsigned>(ch) - '0';
+					if (JSOP_LIKELY(digit < 10)) {
+						current_integer = jsop_mul10_add_32(current_integer, digit);
 						ch = start[4];
-						if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-							current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+						digit = static_cast<unsigned>(ch) - '0';
+						if (JSOP_LIKELY(digit < 10)) {
+							current_integer = jsop_mul10_add_32(current_integer, digit);
 							ch = start[5];
-							if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-								current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+							digit = static_cast<unsigned>(ch) - '0';
+							if (JSOP_LIKELY(digit < 10)) {
+								current_integer = jsop_mul10_add_32(current_integer, digit);
 								ch = start[6];
-								if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-									current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+								digit = static_cast<unsigned>(ch) - '0';
+								if (JSOP_LIKELY(digit < 10)) {
+									current_integer = jsop_mul10_add_32(current_integer, digit);
 									ch = start[7];
-									if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-										current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+									digit = static_cast<unsigned>(ch) - '0';
+									if (JSOP_LIKELY(digit < 10)) {
+										current_integer = jsop_mul10_add_32(current_integer, digit);
 										ch = start[8];
-										if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-											current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+										digit = static_cast<unsigned>(ch) - '0';
+										if (JSOP_LIKELY(digit < 10)) {
+											current_integer = jsop_mul10_add_64(current_integer, digit);
 											ch = start[9];
-											if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-												current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+											digit = static_cast<unsigned>(ch) - '0';
+											if (JSOP_LIKELY(digit < 10)) {
+												current_integer = jsop_mul10_add_64(current_integer, digit);
 												ch = start[10];
-												if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-													current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+												digit = static_cast<unsigned>(ch) - '0';
+												if (JSOP_LIKELY(digit < 10)) {
+													current_integer = jsop_mul10_add_64(current_integer, digit);
 													ch = start[11];
-													if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-														current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+													digit = static_cast<unsigned>(ch) - '0';
+													if (JSOP_LIKELY(digit < 10)) {
+														current_integer = jsop_mul10_add_64(current_integer, digit);
 														ch = start[12];
-														if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-															current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+														digit = static_cast<unsigned>(ch) - '0';
+														if (JSOP_LIKELY(digit < 10)) {
+															current_integer = jsop_mul10_add_64(current_integer, digit);
 															ch = start[13];
-															if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-																current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+															digit = static_cast<unsigned>(ch) - '0';
+															if (JSOP_LIKELY(digit < 10)) {
+																current_integer = jsop_mul10_add_64(current_integer, digit);
 																ch = start[14];
-																if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-																	current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+																digit = static_cast<unsigned>(ch) - '0';
+																if (JSOP_LIKELY(digit < 10)) {
+																	current_integer = jsop_mul10_add_64(current_integer, digit);
 																	ch = start[15];
-																	if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-																		current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+																	digit = static_cast<unsigned>(ch) - '0';
+																	if (JSOP_LIKELY(digit < 10)) {
+																		current_integer = jsop_mul10_add_64(current_integer, digit);
 																		ch = start[16];
-																		if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-																			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+																		digit = static_cast<unsigned>(ch) - '0';
+																		if (JSOP_LIKELY(digit < 10)) {
+																			current_integer = jsop_mul10_add_64(current_integer, digit);
 																			ch = start[17];
+																			digit = static_cast<unsigned>(ch) - '0';
 																			start += 18;
-																			if (JSOP_LIKELY(ch >= '0' && ch <= '9')) {
-																				current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+																			if (JSOP_LIKELY(digit < 10)) {
+																				current_integer = jsop_mul10_add_64(current_integer, digit);
 																				CurrentInteger = current_integer;
 #ifdef JSOP_IGNORE_OVERFLOW
 																				goto action_number_1_non_zero_digit;
@@ -991,151 +1068,114 @@ action_number_1_non_zero_digit:
 																				goto state_number;
 #endif
 																			} else {
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 																				if (JSOP_LIKELY(ch == '.')) {
 																					goto action_fractional_part_18_non_zero_digit;
 																				}
-#endif
 																			}
 																		} else {
 																			start += 17;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 																			if (JSOP_LIKELY(ch == '.')) {
 																				goto action_fractional_part_17_non_zero_digit;
 																			}
-#endif
 																		}
 																	} else {
 																		start += 16;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 																		if (JSOP_LIKELY(ch == '.')) {
 																			goto action_fractional_part_16_non_zero_digit;
 																		}
-#endif
 																	}
 																} else {
 																	start += 15;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 																	if (JSOP_LIKELY(ch == '.')) {
 																		goto action_fractional_part_15_non_zero_digit;
 																	}
-#endif
 																}
 															} else {
 																start += 14;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 																if (JSOP_LIKELY(ch == '.')) {
 																	goto action_fractional_part_14_non_zero_digit;
 																}
-#endif
 															}
 														} else {
 															start += 13;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 															if (JSOP_LIKELY(ch == '.')) {
 																goto action_fractional_part_13_non_zero_digit;
 															}
-#endif
 														}
 													} else {
 														start += 12;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 														if (JSOP_LIKELY(ch == '.')) {
 															goto action_fractional_part_12_non_zero_digit;
 														}
-#endif
 													}
 												} else {
 													start += 11;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 													if (JSOP_LIKELY(ch == '.')) {
 														goto action_fractional_part_11_non_zero_digit;
 													}
-#endif
 												}
 											} else {
 												start += 10;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 												if (JSOP_LIKELY(ch == '.')) {
 													goto action_fractional_part_10_non_zero_digit;
 												}
-#endif
 											}
 										} else {
 											start += 9;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 											if (JSOP_LIKELY(ch == '.')) {
 												goto action_fractional_part_9_non_zero_digit;
 											}
-#endif
 										}
 									} else {
 										start += 8;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 										if (JSOP_LIKELY(ch == '.')) {
 											goto action_fractional_part_8_non_zero_digit;
 										}
-#endif
 									}
 								} else {
 									start += 7;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 									if (JSOP_LIKELY(ch == '.')) {
 										goto action_fractional_part_7_non_zero_digit;
 									}
-#endif
 								}
 							} else {
 								start += 6;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 								if (JSOP_LIKELY(ch == '.')) {
 									goto action_fractional_part_6_non_zero_digit;
 								}
-#endif
 							}
 						} else {
 							start += 5;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 							if (JSOP_LIKELY(ch == '.')) {
 								goto action_fractional_part_5_non_zero_digit;
 							}
-#endif
 						}
 					} else {
 						start += 4;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 						if (JSOP_LIKELY(ch == '.')) {
 							goto action_fractional_part_4_non_zero_digit;
 						}
-#endif
 					}
 				} else {
 					start += 3;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 					if (JSOP_LIKELY(ch == '.')) {
 						goto action_fractional_part_3_non_zero_digit;
 					}
-#endif
 				}
 			} else {
 				start += 2;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 				if (JSOP_LIKELY(ch == '.')) {
 					goto action_fractional_part_2_non_zero_digit;
 				}
-#endif
 			}
 		} else {
 			start += 1;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 			if (JSOP_LIKELY(ch == '.')) {
 				goto action_fractional_part_1_non_zero_digit;
 			}
-#endif
 		}
 
 		CurrentInteger = current_integer;
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 		switch (ch) {
 		case 'E':
 		case 'e':
@@ -1165,8 +1205,10 @@ action_number_1_non_zero_digit:
 			goto cleanup_on_error;
 
 		case '\n':
+#ifdef JSOP_PARSER_LOCATION
 			++cur_line;
 			cur_line_start = start;
+#endif
 		case ' ':
 		case '\t':
 		case '\r':
@@ -1189,8 +1231,9 @@ action_number_1_non_zero_digit:
 
 action_fractional_part_1_non_zero_digit:
 		ch = token_end[-17];
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_32(current_integer, digit);
 		} else {
 			token_end -= 16;
 			goto action_fractional_part_non_zero_digit_final;
@@ -1198,8 +1241,9 @@ action_fractional_part_1_non_zero_digit:
 
 action_fractional_part_2_non_zero_digit:
 		ch = token_end[-16];
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_32(current_integer, digit);
 		} else {
 			token_end -= 15;
 			goto action_fractional_part_non_zero_digit_final;
@@ -1207,8 +1251,9 @@ action_fractional_part_2_non_zero_digit:
 
 action_fractional_part_3_non_zero_digit:
 		ch = token_end[-15];
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_32(current_integer, digit);
 		} else {
 			token_end -= 14;
 			goto action_fractional_part_non_zero_digit_final;
@@ -1216,8 +1261,9 @@ action_fractional_part_3_non_zero_digit:
 
 action_fractional_part_4_non_zero_digit:
 		ch = token_end[-14];
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_32(current_integer, digit);
 		} else {
 			token_end -= 13;
 			goto action_fractional_part_non_zero_digit_final;
@@ -1225,8 +1271,9 @@ action_fractional_part_4_non_zero_digit:
 
 action_fractional_part_5_non_zero_digit:
 		ch = token_end[-13];
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_32(current_integer, digit);
 		} else {
 			token_end -= 12;
 			goto action_fractional_part_non_zero_digit_final;
@@ -1234,8 +1281,9 @@ action_fractional_part_5_non_zero_digit:
 
 action_fractional_part_6_non_zero_digit:
 		ch = token_end[-12];
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_32(current_integer, digit);
 		} else {
 			token_end -= 11;
 			goto action_fractional_part_non_zero_digit_final;
@@ -1243,8 +1291,9 @@ action_fractional_part_6_non_zero_digit:
 
 action_fractional_part_7_non_zero_digit:
 		ch = token_end[-11];
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_32(current_integer, digit);
 		} else {
 			token_end -= 10;
 			goto action_fractional_part_non_zero_digit_final;
@@ -1252,8 +1301,9 @@ action_fractional_part_7_non_zero_digit:
 
 action_fractional_part_8_non_zero_digit:
 		ch = token_end[-10];
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_32(current_integer, digit);
 		} else {
 			token_end -= 9;
 			goto action_fractional_part_non_zero_digit_final;
@@ -1261,8 +1311,9 @@ action_fractional_part_8_non_zero_digit:
 
 action_fractional_part_9_non_zero_digit:
 		ch = token_end[-9];
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_64(current_integer, digit);
 		} else {
 			token_end -= 8;
 			goto action_fractional_part_non_zero_digit_final;
@@ -1270,8 +1321,9 @@ action_fractional_part_9_non_zero_digit:
 
 action_fractional_part_10_non_zero_digit:
 		ch = token_end[-8];
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_64(current_integer, digit);
 		} else {
 			token_end -= 7;
 			goto action_fractional_part_non_zero_digit_final;
@@ -1279,8 +1331,9 @@ action_fractional_part_10_non_zero_digit:
 
 action_fractional_part_11_non_zero_digit:
 		ch = token_end[-7];
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_64(current_integer, digit);
 		} else {
 			token_end -= 6;
 			goto action_fractional_part_non_zero_digit_final;
@@ -1288,8 +1341,9 @@ action_fractional_part_11_non_zero_digit:
 
 action_fractional_part_12_non_zero_digit:
 		ch = token_end[-6];
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_64(current_integer, digit);
 		} else {
 			token_end -= 5;
 			goto action_fractional_part_non_zero_digit_final;
@@ -1297,8 +1351,9 @@ action_fractional_part_12_non_zero_digit:
 
 action_fractional_part_13_non_zero_digit:
 		ch = token_end[-5];
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_64(current_integer, digit);
 		} else {
 			token_end -= 4;
 			goto action_fractional_part_non_zero_digit_final;
@@ -1306,8 +1361,9 @@ action_fractional_part_13_non_zero_digit:
 
 action_fractional_part_14_non_zero_digit:
 		ch = token_end[-4];
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_64(current_integer, digit);
 		} else {
 			token_end -= 3;
 			goto action_fractional_part_non_zero_digit_final;
@@ -1315,8 +1371,9 @@ action_fractional_part_14_non_zero_digit:
 
 action_fractional_part_15_non_zero_digit:
 		ch = token_end[-3];
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_64(current_integer, digit);
 		} else {
 			token_end -= 2;
 			goto action_fractional_part_non_zero_digit_final;
@@ -1324,8 +1381,9 @@ action_fractional_part_15_non_zero_digit:
 
 action_fractional_part_16_non_zero_digit:
 		ch = token_end[-2];
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_64(current_integer, digit);
 		} else {
 			token_end -= 1;
 			goto action_fractional_part_non_zero_digit_final;
@@ -1333,8 +1391,9 @@ action_fractional_part_16_non_zero_digit:
 
 action_fractional_part_17_non_zero_digit:
 		ch = token_end[-1];
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_64(current_integer, digit);
 		} else {
 			goto action_fractional_part_non_zero_digit_final;
 		}
@@ -1342,8 +1401,9 @@ action_fractional_part_17_non_zero_digit:
 action_fractional_part_18_non_zero_digit:
 		ch = token_end[0];
 		token_end += 1;
-		if (ch >= '0' && ch <= '9') {
-			current_integer = current_integer * 10 + (static_cast<size_t>(ch) - '0');
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			current_integer = jsop_mul10_add_64(current_integer, digit);
 			CurrentInteger = current_integer;
 			CurrentExponent -= reinterpret_cast<uintptr_t>(token_end) - reinterpret_cast<uintptr_t>(start);
 			start = token_end;
@@ -1355,9 +1415,6 @@ action_fractional_part_non_zero_digit_final:
 		CurrentExponent -= reinterpret_cast<uintptr_t>(token_end) - reinterpret_cast<uintptr_t>(start) - 1;
 		start = token_end;
 		goto action_fractional_part_not_a_digit;
-#else
-		goto action_number_not_a_digit;
-#endif
 	}
 	//Fallthrough to state_number
 
@@ -1365,13 +1422,14 @@ state_number:
 	if (start != end) {
 		ch = *start;
 		++start;
-		if (ch >= '0' && ch <= '9') {
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
 #ifdef JSOP_IGNORE_OVERFLOW
-			CurrentInteger = CurrentInteger * 10 + (static_cast<size_t>(ch) - '0');
+			CurrentInteger = jsop_mul10_add_64(CurrentInteger, digit);
 			goto state_number;
 #else
 			old_integer = CurrentInteger;
-			CurrentInteger = old_integer * 10 + (static_cast<size_t>(ch) - '0');
+			CurrentInteger = jsop_mul10_add_64(old_integer, digit);
 			if (JSOP_LIKELY(old_integer <= UINT64_C(1844674407370955160))) {
 				goto state_number;
 			} else if (old_integer == UINT64_C(1844674407370955161)) {
@@ -1416,8 +1474,10 @@ action_number_not_a_digit:
 				goto cleanup_on_error;
 
 			case '\n':
+#ifdef JSOP_PARSER_LOCATION
 				++cur_line;
 				cur_line_start = start;
+#endif
 			case ' ':
 			case '\t':
 			case '\r':
@@ -1446,9 +1506,10 @@ state_fractional_part_first_digit:
 	if (start != end) {
 		ch = *start;
 		++start;
-		if (ch >= '0' and ch <= '9') {
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
 			CurrentExponent = -1;
-			CurrentInteger = static_cast<size_t>(ch) - '0';
+			CurrentInteger = digit;
 			goto state_fractional_part;
 		} else {
 			goto cleanup_on_error;
@@ -1461,14 +1522,15 @@ state_fractional_part:
 	if (start != end) {
 		ch = *start;
 		++start;
-		if (ch >= '0' and ch <= '9') {
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
 			CurrentExponent -= 1;
 #ifdef JSOP_IGNORE_OVERFLOW
-			CurrentInteger = CurrentInteger * 10 + (static_cast<size_t>(ch) - '0');
+			CurrentInteger = jsop_mul10_add_64(CurrentInteger, digit);
 			goto state_fractional_part;
 #else
 			old_integer = CurrentInteger;
-			CurrentInteger = old_integer * 10 + (static_cast<size_t>(ch) - '0');
+			CurrentInteger = jsop_mul10_add_64(old_integer, digit);
 			if (JSOP_LIKELY(old_integer <= UINT64_C(1844674407370955160))) {
 				goto state_fractional_part;
 			} else if (old_integer == UINT64_C(1844674407370955161)) {
@@ -1479,9 +1541,7 @@ state_fractional_part:
 			goto cleanup_on_error;
 #endif
 		} else {
-#ifdef JSOP_PARSER_UNROLL_DOUBLE_SPLIT_SIGNIFICAND
 action_fractional_part_not_a_digit:
-#endif
 			switch (ch) {
 			case 'E':
 			case 'e':
@@ -1510,8 +1570,10 @@ action_fractional_part_not_a_digit:
 				goto cleanup_on_error;
 
 			case '\n':
+#ifdef JSOP_PARSER_LOCATION
 				++cur_line;
 				cur_line_start = start;
+#endif
 			case ' ':
 			case '\t':
 			case '\r':
@@ -1574,8 +1636,9 @@ state_exponent_first_digit:
 	if (start != end) {
 		ch = *start;
 		++start;
-		if (ch >= '0' && ch <= '9') {
-			CurrentSpecifiedExponent = ch - '0';
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			CurrentSpecifiedExponent = digit;
 			goto state_exponent;
 		} else {
 			goto cleanup_on_error;
@@ -1588,13 +1651,14 @@ state_exponent:
 	if (start != end) {
 		ch = *start;
 		++start;
-		if (ch >= '0' && ch <= '9') {
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
 #ifdef JSOP_IGNORE_OVERFLOW
-			CurrentSpecifiedExponent = CurrentSpecifiedExponent * 10 + (ch - '0');
+			CurrentSpecifiedExponent = CurrentSpecifiedExponent * 10 + digit;
 			goto state_exponent;
 #else
 			if (JSOP_LIKELY(CurrentSpecifiedExponent <= (INT_MAX / 10 - 1))) {
-				CurrentSpecifiedExponent = CurrentSpecifiedExponent * 10 + (ch - '0');
+				CurrentSpecifiedExponent = CurrentSpecifiedExponent * 10 + digit;
 			}
 			goto state_exponent;
 #endif
@@ -1623,8 +1687,10 @@ state_exponent:
 				goto cleanup_on_error;
 
 			case '\n':
+#ifdef JSOP_PARSER_LOCATION
 				++cur_line;
 				cur_line_start = start;
+#endif
 			case ' ':
 			case '\t':
 			case '\r':
@@ -1710,8 +1776,10 @@ state_binary_number:
 			goto cleanup_on_error;
 
 		case '\n':
+#ifdef JSOP_PARSER_LOCATION
 			++cur_line;
 			cur_line_start = start;
+#endif
 		case ' ':
 		case '\t':
 		case '\r':
@@ -1741,42 +1809,13 @@ state_hex_dot_or_first_digit:
 	if (start != end) {
 		ch = *start;
 		++start;
-		switch (ch) {
-		case '0':
-		case '1':
-		case '2':
-		case '3':
-		case '4':
-		case '5':
-		case '6':
-		case '7':
-		case '8':
-		case '9':
-			CurrentInteger = static_cast<size_t>(ch) - '0';
+		digit = JsopCodePointHexDigitValue[ch];
+		if (JSOP_LIKELY(digit < 16)) {
+			CurrentInteger = digit;
 			goto state_hex_number;
-
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-			CurrentInteger = static_cast<size_t>(ch) - 'A' + 10;
-			goto state_hex_number;
-
-		case 'a':
-		case 'b':
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-			CurrentInteger = static_cast<size_t>(ch) - 'a' + 10;
-			goto state_hex_number;
-
-		case '.':
+		} else if (JSOP_LIKELY(ch == '.')) {
 			goto state_hex_fractional_part_first_digit;
-
-		default:
+		} else {
 			goto cleanup_on_error;
 		}
 	} else {
@@ -1787,120 +1826,77 @@ state_hex_number:
 	if (start != end) {
 		ch = *start;
 		++start;
-		switch (ch) {
-		case '0':
-		case '1':
-		case '2':
-		case '3':
-		case '4':
-		case '5':
-		case '6':
-		case '7':
-		case '8':
-		case '9':
+		digit = JsopCodePointHexDigitValue[ch];
+		if (JSOP_LIKELY(digit < 16)) {
 #ifdef JSOP_IGNORE_OVERFLOW
-			CurrentInteger = CurrentInteger * 16 + (static_cast<size_t>(ch) - '0');
+			CurrentInteger = CurrentInteger * 16 + digit;
 			goto state_hex_number;
 #else
 			old_integer = CurrentInteger;
-			CurrentInteger = old_integer * 16 + (static_cast<size_t>(ch) - '0');
+			CurrentInteger = old_integer * 16 + digit;
 			if (JSOP_LIKELY(old_integer <= UINT64_C(0xFFFFFFFFFFFFFFF))) {
 				goto state_hex_number;
 			} else {
 				goto cleanup_on_error;
 			}
 #endif
+		} else {
+			switch (ch) {
+			case '.':
+				CurrentExponent = 0;
+				goto state_hex_fractional_part;
 
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-#ifdef JSOP_IGNORE_OVERFLOW
-			CurrentInteger = CurrentInteger * 16 + (static_cast<size_t>(ch) - 'A' + 10);
-			goto state_hex_number;
-#else
-			old_integer = CurrentInteger;
-			CurrentInteger = old_integer * 16 + (static_cast<size_t>(ch) - 'A' + 10);
-			if (JSOP_LIKELY(old_integer <= UINT64_C(0xFFFFFFFFFFFFFFF))) {
-				goto state_hex_number;
-			} else {
-				goto cleanup_on_error;
-			}
-#endif
+			case 'P':
+			case 'p':
+				CurrentExponent = 0;
+				goto state_binary_exponent_sign_or_first_digit;
 
-		case 'a':
-		case 'b':
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-#ifdef JSOP_IGNORE_OVERFLOW
-			CurrentInteger = CurrentInteger * 16 + (static_cast<size_t>(ch) - 'a' + 10);
-			goto state_hex_number;
-#else
-			old_integer = CurrentInteger;
-			CurrentInteger = old_integer * 16 + (static_cast<size_t>(ch) - 'a' + 10);
-			if (JSOP_LIKELY(old_integer <= UINT64_C(0xFFFFFFFFFFFFFFF))) {
-				goto state_hex_number;
-			} else {
-				goto cleanup_on_error;
-			}
-#endif
-
-		case '.':
-			CurrentExponent = 0;
-			goto state_hex_fractional_part;
-
-		case 'P':
-		case 'p':
-			CurrentExponent = 0;
-			goto state_binary_exponent_sign_or_first_digit;
-
-		case ',':
-			if (!H::inTop()) {
-				if (H::makeInteger(CurrentInteger, Negate)) {
-					JSOP_PARSER_COMMA_COMMON_ACTION;
+			case ',':
+				if (!H::inTop()) {
+					if (H::makeInteger(CurrentInteger, Negate)) {
+						JSOP_PARSER_COMMA_COMMON_ACTION;
+					}
 				}
-			}
-			goto cleanup_on_error;
+				goto cleanup_on_error;
 
-		case ']':
-			//Add the new value and create the array
-			if (H::makeInteger(CurrentInteger, Negate)) {
-				goto action_array_close_brace;
-			}
-			goto cleanup_on_error;
+			case ']':
+				//Add the new value and create the array
+				if (H::makeInteger(CurrentInteger, Negate)) {
+					goto action_array_close_brace;
+				}
+				goto cleanup_on_error;
 
-		case '}':
-			//Add the new value and create the object
-			if (H::makeInteger(CurrentInteger, Negate)) {
-				goto action_object_close_brace;
-			}
-			goto cleanup_on_error;
+			case '}':
+				//Add the new value and create the object
+				if (H::makeInteger(CurrentInteger, Negate)) {
+					goto action_object_close_brace;
+				}
+				goto cleanup_on_error;
 
-		case '\n':
-			++cur_line;
-			cur_line_start = start;
-		case ' ':
-		case '\t':
-		case '\r':
-			if (H::makeInteger(CurrentInteger, Negate)) {
-				JSOP_PARSER_PUSH_VALUE_EPILOGUE;
-			}
-			goto cleanup_on_error;
+			case '\n':
+#ifdef JSOP_PARSER_LOCATION
+				++cur_line;
+				cur_line_start = start;
+#endif
+			case ' ':
+			case '\t':
+			case '\r':
+				if (H::makeInteger(CurrentInteger, Negate)) {
+					JSOP_PARSER_PUSH_VALUE_EPILOGUE;
+				}
+				goto cleanup_on_error;
 
 #ifdef JSOP_PARSE_COMMENT
-		case '/':
-			if (H::makeInteger(CurrentInteger, Negate)) {
-				JSOP_PARSER_PUSH_VALUE_COMMENT_EPILOGUE;
-			}
-			goto cleanup_on_error;
+			case '/':
+				if (H::makeInteger(CurrentInteger, Negate)) {
+					JSOP_PARSER_PUSH_VALUE_COMMENT_EPILOGUE;
+				}
+				goto cleanup_on_error;
 #endif
 
-		default:
-			goto cleanup_on_error;
+			default:
+				goto cleanup_on_error;
+			}
 		}
 	} else {
 		JSOP_PARSER_RETURN(HexNumber);
@@ -1910,42 +1906,12 @@ state_hex_fractional_part_first_digit:
 	if (start != end) {
 		ch = *start;
 		++start;
-		switch (ch) {
-		case '0':
-		case '1':
-		case '2':
-		case '3':
-		case '4':
-		case '5':
-		case '6':
-		case '7':
-		case '8':
-		case '9':
+		digit = JsopCodePointHexDigitValue[ch];
+		if (JSOP_LIKELY(digit < 16)) {
 			CurrentExponent = -4;
-			CurrentInteger = static_cast<size_t>(ch) - '0';
+			CurrentInteger = digit;
 			goto state_hex_fractional_part;
-
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-			CurrentExponent = -4;
-			CurrentInteger = static_cast<size_t>(ch) - 'A' + 10;
-			goto state_hex_fractional_part;
-
-		case 'a':
-		case 'b':
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-			CurrentExponent = -4;
-			CurrentInteger = static_cast<size_t>(ch) - 'a' + 10;
-			goto state_hex_fractional_part;
-
-		default:
+		} else {
 			goto cleanup_on_error;
 		}
 	} else {
@@ -1956,77 +1922,30 @@ state_hex_fractional_part:
 	if (start != end) {
 		ch = *start;
 		++start;
-		switch (ch) {
-		case '0':
-		case '1':
-		case '2':
-		case '3':
-		case '4':
-		case '5':
-		case '6':
-		case '7':
-		case '8':
-		case '9':
+		digit = JsopCodePointHexDigitValue[ch];
+		if (JSOP_LIKELY(digit < 16)) {
 			CurrentExponent -= 4;
 #ifdef JSOP_IGNORE_OVERFLOW
-			CurrentInteger = CurrentInteger * 16 + (static_cast<size_t>(ch) - '0');
+			CurrentInteger = CurrentInteger * 16 + digit;
 			goto state_hex_fractional_part;
 #else
 			old_integer = CurrentInteger;
-			CurrentInteger = old_integer * 16 + (static_cast<size_t>(ch) - '0');
+			CurrentInteger = old_integer * 16 + digit;
 			if (JSOP_LIKELY(old_integer <= UINT64_C(0xFFFFFFFFFFFFFFF))) {
 				goto state_hex_fractional_part;
 			} else {
 				goto cleanup_on_error;
 			}
 #endif
+		} else {
+			switch (ch) {
+			case 'P':
+			case 'p':
+				goto state_binary_exponent_sign_or_first_digit;
 
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-			CurrentExponent -= 4;
-#ifdef JSOP_IGNORE_OVERFLOW
-			CurrentInteger = CurrentInteger * 16 + (static_cast<size_t>(ch) - 'A' + 10);
-			goto state_hex_fractional_part;
-#else
-			old_integer = CurrentInteger;
-			CurrentInteger = old_integer * 16 + (static_cast<size_t>(ch) - 'A' + 10);
-			if (JSOP_LIKELY(old_integer <= UINT64_C(0xFFFFFFFFFFFFFFF))) {
-				goto state_hex_fractional_part;
-			} else {
+			default:
 				goto cleanup_on_error;
 			}
-#endif
-
-		case 'a':
-		case 'b':
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-			CurrentExponent -= 4;
-#ifdef JSOP_IGNORE_OVERFLOW
-			CurrentInteger = CurrentInteger * 16 + (static_cast<size_t>(ch) - 'a' + 10);
-			goto state_hex_fractional_part;
-#else
-			old_integer = CurrentInteger;
-			CurrentInteger = old_integer * 16 + (static_cast<size_t>(ch) - 'a' + 10);
-			if (JSOP_LIKELY(old_integer <= UINT64_C(0xFFFFFFFFFFFFFFF))) {
-				goto state_hex_fractional_part;
-			} else {
-				goto cleanup_on_error;
-			}
-#endif
-
-		case 'P':
-		case 'p':
-			goto state_binary_exponent_sign_or_first_digit;
-
-		default:
-			goto cleanup_on_error;
 		}
 	} else {
 		JSOP_PARSER_RETURN(HexFractionalPart);
@@ -2070,8 +1989,9 @@ state_binary_exponent_first_digit:
 	if (start != end) {
 		ch = *start;
 		++start;
-		if (ch >= '0' && ch <= '9') {
-			CurrentSpecifiedExponent = ch - '0';
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
+			CurrentSpecifiedExponent = digit;
 			goto state_binary_exponent;
 		} else {
 			goto cleanup_on_error;
@@ -2084,13 +2004,14 @@ state_binary_exponent:
 	if (start != end) {
 		ch = *start;
 		++start;
-		if (ch >= '0' && ch <= '9') {
+		digit = static_cast<unsigned>(ch) - '0';
+		if (JSOP_LIKELY(digit < 10)) {
 #ifdef JSOP_IGNORE_OVERFLOW
-			CurrentSpecifiedExponent = CurrentSpecifiedExponent * 10 + (ch - '0');
+			CurrentSpecifiedExponent = CurrentSpecifiedExponent * 10 + digit;
 			goto state_binary_exponent;
 #else
 			if (CurrentSpecifiedExponent <= (INT_MAX / 10 - 1)) {
-				CurrentSpecifiedExponent = CurrentSpecifiedExponent * 10 + (ch - '0');
+				CurrentSpecifiedExponent = CurrentSpecifiedExponent * 10 + digit;
 			}
 			goto state_binary_exponent;
 #endif
@@ -2119,8 +2040,10 @@ state_binary_exponent:
 				goto cleanup_on_error;
 
 			case '\n':
+#ifdef JSOP_PARSER_LOCATION
 				++cur_line;
 				cur_line_start = start;
+#endif
 			case ' ':
 			case '\t':
 			case '\r':
@@ -2608,8 +2531,10 @@ state_end_of_stream:
 		++start;
 		switch (ch) {
 		case '\n':
+#ifdef JSOP_PARSER_LOCATION
 			++cur_line;
 			cur_line_start = start;
+#endif
 		case ' ':
 		case '\t':
 		case '\r':
@@ -2941,44 +2866,15 @@ state_string_escaped_utf16_hex_1:
 	if (start != end) {
 		ch = *start;
 		++start;
-		switch (ch) {
-		case '0':
-		case '1':
-		case '2':
-		case '3':
-		case '4':
-		case '5':
-		case '6':
-		case '7':
-		case '8':
-		case '9':
-			CurrentUtf32 = (ch - '0') * 4096;
+		digit = JsopCodePointHexDigitValue[ch];
+		if (JSOP_LIKELY(digit < 16)) {
+			CurrentUtf32 = digit * 4096;
 			goto state_string_escaped_utf16_hex_2;
-
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-			CurrentUtf32 = (ch - 'A' + 10) * 4096;
-			goto state_string_escaped_utf16_hex_2;
-
-		case 'a':
-		case 'b':
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-			CurrentUtf32 = (ch - 'a' + 10) * 4096;
-			goto state_string_escaped_utf16_hex_2;
-
 #ifdef JSOP_PARSE_BRACKET_ESCAPE
-		case '{':
+		} else if (ch == '{') {
 			goto state_string_escaped_utf32_hex_first;
 #endif
-
-		default:
+		} else {
 			goto cleanup_on_error;
 		}
 	} else {
@@ -2989,39 +2885,11 @@ state_string_escaped_utf16_hex_2:
 	if (start != end) {
 		ch = *start;
 		++start;
-		switch (ch) {
-		case '0':
-		case '1':
-		case '2':
-		case '3':
-		case '4':
-		case '5':
-		case '6':
-		case '7':
-		case '8':
-		case '9':
-			CurrentUtf32 += (ch - '0') * 256;
+		digit = JsopCodePointHexDigitValue[ch];
+		if (JSOP_LIKELY(digit < 16)) {
+			CurrentUtf32 += digit * 256;
 			goto state_string_escaped_utf16_hex_3;
-
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-			CurrentUtf32 += (ch - 'A' + 10) * 256;
-			goto state_string_escaped_utf16_hex_3;
-
-		case 'a':
-		case 'b':
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-			CurrentUtf32 += (ch - 'a' + 10) * 256;
-			goto state_string_escaped_utf16_hex_3;
-
-		default:
+		} else {
 			goto cleanup_on_error;
 		}
 	} else {
@@ -3032,39 +2900,11 @@ state_string_escaped_utf16_hex_3:
 	if (start != end) {
 		ch = *start;
 		++start;
-		switch (ch) {
-		case '0':
-		case '1':
-		case '2':
-		case '3':
-		case '4':
-		case '5':
-		case '6':
-		case '7':
-		case '8':
-		case '9':
-			CurrentUtf32 += (ch - '0') * 16;
+		digit = JsopCodePointHexDigitValue[ch];
+		if (JSOP_LIKELY(digit < 16)) {
+			CurrentUtf32 += digit * 16;
 			goto state_string_escaped_utf16_hex_4;
-
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-			CurrentUtf32 += (ch - 'A' + 10) * 16;
-			goto state_string_escaped_utf16_hex_4;
-
-		case 'a':
-		case 'b':
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-			CurrentUtf32 += (ch - 'a' + 10) * 16;
-			goto state_string_escaped_utf16_hex_4;
-
-		default:
+		} else {
 			goto cleanup_on_error;
 		}
 	} else {
@@ -3075,39 +2915,10 @@ state_string_escaped_utf16_hex_4:
 	if (start != end) {
 		ch = *start;
 		++start;
-		switch (ch) {
-		case '0':
-		case '1':
-		case '2':
-		case '3':
-		case '4':
-		case '5':
-		case '6':
-		case '7':
-		case '8':
-		case '9':
-			CurrentUtf32 += (ch - '0');
-			break;
-
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-			CurrentUtf32 += (ch - 'A' + 10);
-			break;
-
-		case 'a':
-		case 'b':
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-			CurrentUtf32 += (ch - 'a' + 10);
-			break;
-
-		default:
+		digit = JsopCodePointHexDigitValue[ch];
+		if (JSOP_LIKELY(digit < 16)) {
+			CurrentUtf32 += digit;
+		} else {
 			goto cleanup_on_error;
 		}
 
@@ -3203,22 +3014,11 @@ state_string_escaped_utf16_surrogate_hex_2:
 	if (start != end) {
 		ch = *start;
 		++start;
-		switch (ch) {
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-			CurrentUtf32 += (ch - 'C') * 256;
+		digit = JsopCodePointHexDigitValue[ch] - 12;
+		if (JSOP_LIKELY(digit < 4)) {
+			CurrentUtf32 += digit * 256;
 			goto state_string_escaped_utf16_surrogate_hex_3;
-
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-			CurrentUtf32 += (ch - 'c') * 256;
-			goto state_string_escaped_utf16_surrogate_hex_3;
-
-		default:
+		} else {
 			goto cleanup_on_error;
 		}
 	} else {
@@ -3229,39 +3029,11 @@ state_string_escaped_utf16_surrogate_hex_3:
 	if (start != end) {
 		ch = *start;
 		++start;
-		switch (ch) {
-		case '0':
-		case '1':
-		case '2':
-		case '3':
-		case '4':
-		case '5':
-		case '6':
-		case '7':
-		case '8':
-		case '9':
-			CurrentUtf32 += (ch - '0') * 16;
+		digit = JsopCodePointHexDigitValue[ch];
+		if (JSOP_LIKELY(digit < 16)) {
+			CurrentUtf32 += digit * 16;
 			goto state_string_escaped_utf16_surrogate_hex_4;
-
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-			CurrentUtf32 += (ch - 'A' + 10) * 16;
-			goto state_string_escaped_utf16_surrogate_hex_4;
-
-		case 'a':
-		case 'b':
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-			CurrentUtf32 += (ch - 'a' + 10) * 16;
-			goto state_string_escaped_utf16_surrogate_hex_4;
-
-		default:
+		} else {
 			goto cleanup_on_error;
 		}
 	} else {
@@ -3272,39 +3044,10 @@ state_string_escaped_utf16_surrogate_hex_4:
 	if (start != end) {
 		ch = *start;
 		++start;
-		switch (ch) {
-		case '0':
-		case '1':
-		case '2':
-		case '3':
-		case '4':
-		case '5':
-		case '6':
-		case '7':
-		case '8':
-		case '9':
-			CurrentUtf32 += (ch - '0');
-			break;
-
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-			CurrentUtf32 += (ch - 'A' + 10);
-			break;
-
-		case 'a':
-		case 'b':
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-			CurrentUtf32 += (ch - 'a' + 10);
-			break;
-
-		default:
+		digit = JsopCodePointHexDigitValue[ch];
+		if (JSOP_LIKELY(digit < 16)) {
+			CurrentUtf32 += digit;
+		} else {
 			goto cleanup_on_error;
 		}
 
@@ -3341,39 +3084,11 @@ state_string_escaped_utf32_hex_first:
 	if (start != end) {
 		ch = *start;
 		++start;
-		switch (ch) {
-		case '0':
-		case '1':
-		case '2':
-		case '3':
-		case '4':
-		case '5':
-		case '6':
-		case '7':
-		case '8':
-		case '9':
-			CurrentUtf32 = ch - '0';
+		digit = JsopCodePointHexDigitValue[ch];
+		if (JSOP_LIKELY(digit < 16)) {
+			CurrentUtf32 = digit;
 			goto state_string_escaped_utf32_hex;
-
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-			CurrentUtf32 = (ch - 'A' + 10);
-			goto state_string_escaped_utf32_hex;
-
-		case 'a':
-		case 'b':
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-			CurrentUtf32 = (ch - 'a' + 10);
-			goto state_string_escaped_utf32_hex;
-
-		default:
+		} else {
 			goto cleanup_on_error;
 		}
 	} else {
@@ -3384,51 +3099,15 @@ state_string_escaped_utf32_hex:
 	if (start != end) {
 		ch = *start;
 		++start;
-		switch (ch) {
-		case '0':
-		case '1':
-		case '2':
-		case '3':
-		case '4':
-		case '5':
-		case '6':
-		case '7':
-		case '8':
-		case '9':
-			CurrentUtf32 = CurrentUtf32 * 16 + (ch - '0');
+		digit = JsopCodePointHexDigitValue[ch];
+		if (JSOP_LIKELY(digit < 16)) {
+			CurrentUtf32 = CurrentUtf32 * 16 + digit;
 			if (CurrentUtf32 < 0x110000) {
 				goto state_string_escaped_utf32_hex;
 			} else {
 				goto cleanup_on_error;
 			}
-
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-			CurrentUtf32 = CurrentUtf32 * 16 + (ch - 'A' + 10);
-			if (CurrentUtf32 < 0x110000) {
-				goto state_string_escaped_utf32_hex;
-			} else {
-				goto cleanup_on_error;
-			}
-
-		case 'a':
-		case 'b':
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-			CurrentUtf32 = CurrentUtf32 * 16 + (ch - 'a' + 10);
-			if (CurrentUtf32 < 0x110000) {
-				goto state_string_escaped_utf32_hex;
-			} else {
-				goto cleanup_on_error;
-			}
-
-		case '}':
+		} else if (ch == '}') {
 			if (CurrentUtf32 < 0xD800 || CurrentUtf32 >= 0xE000) {
 #ifndef JSOP_PARSE_UNQUOTED_KEY
 				if (Buffer.appendUtf32(CurrentUtf32)) {
@@ -3462,8 +3141,7 @@ state_string_escaped_utf32_hex:
 				//Utf16 low surrogate should not be encountered first
 				goto cleanup_on_error;
 			}
-
-		default:
+		} else {
 			goto cleanup_on_error;
 		}
 	} else {
@@ -3493,22 +3171,11 @@ state_string_escaped_utf32_surrogate_hex_2:
 	if (start != end) {
 		ch = *start;
 		++start;
-		switch (ch) {
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-			CurrentUtf32 += (ch - 'C') * 256;
+		digit = JsopCodePointHexDigitValue[ch] - 12;
+		if (JSOP_LIKELY(digit < 4)) {
+			CurrentUtf32 += digit * 256;
 			goto state_string_escaped_utf32_surrogate_hex_3;
-
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-			CurrentUtf32 += (ch - 'c') * 256;
-			goto state_string_escaped_utf32_surrogate_hex_3;
-
-		default:
+		} else {
 			goto cleanup_on_error;
 		}
 	} else {
@@ -3519,39 +3186,11 @@ state_string_escaped_utf32_surrogate_hex_3:
 	if (start != end) {
 		ch = *start;
 		++start;
-		switch (ch) {
-		case '0':
-		case '1':
-		case '2':
-		case '3':
-		case '4':
-		case '5':
-		case '6':
-		case '7':
-		case '8':
-		case '9':
-			CurrentUtf32 += (ch - '0') * 16;
+		digit = JsopCodePointHexDigitValue[ch];
+		if (JSOP_LIKELY(digit < 16)) {
+			CurrentUtf32 += digit * 16;
 			goto state_string_escaped_utf32_surrogate_hex_4;
-
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-			CurrentUtf32 += (ch - 'A' + 10) * 16;
-			goto state_string_escaped_utf32_surrogate_hex_4;
-
-		case 'a':
-		case 'b':
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-			CurrentUtf32 += (ch - 'a' + 10) * 16;
-			goto state_string_escaped_utf32_surrogate_hex_4;
-
-		default:
+		} else {
 			goto cleanup_on_error;
 		}
 	} else {
@@ -3562,39 +3201,11 @@ state_string_escaped_utf32_surrogate_hex_4:
 	if (start != end) {
 		ch = *start;
 		++start;
-		switch (ch) {
-		case '0':
-		case '1':
-		case '2':
-		case '3':
-		case '4':
-		case '5':
-		case '6':
-		case '7':
-		case '8':
-		case '9':
-			CurrentUtf32 += (ch - '0');
+		digit = JsopCodePointHexDigitValue[ch];
+		if (JSOP_LIKELY(digit < 16)) {
+			CurrentUtf32 += digit;
 			goto state_string_escaped_utf32_surrogate_right_bracket;
-
-		case 'A':
-		case 'B':
-		case 'C':
-		case 'D':
-		case 'E':
-		case 'F':
-			CurrentUtf32 += (ch - 'A' + 10);
-			goto state_string_escaped_utf32_surrogate_right_bracket;
-
-		case 'a':
-		case 'b':
-		case 'c':
-		case 'd':
-		case 'e':
-		case 'f':
-			CurrentUtf32 += (ch - 'a' + 10);
-			goto state_string_escaped_utf32_surrogate_right_bracket;
-
-		default:
+		} else {
 			goto cleanup_on_error;
 		}
 	} else {
@@ -3771,7 +3382,9 @@ state_values:
 
 #ifdef JSOP_PARSE_INFINITY
 		case 'I':
+#ifndef JSOP_PARSE_STRICT_INFINITY_AND_NAN
 		case 'i':
+#endif
 			JSOP_PARSER_SET_COMMA_BEFORE_BRACE(false);
 			Negate = false;
 			goto state_literal_i;
@@ -3821,8 +3434,10 @@ state_values:
 			goto cleanup_on_error;
 
 		case '\n':
+#ifdef JSOP_PARSER_LOCATION
 			++cur_line;
 			cur_line_start = start;
+#endif
 		case ' ':
 		case '\t':
 		case '\r':
@@ -3853,8 +3468,10 @@ state_values_separator_or_close:
 			goto action_array_close_brace;
 
 		case '\n':
+#ifdef JSOP_PARSER_LOCATION
 			++cur_line;
 			cur_line_start = start;
+#endif
 		case ' ':
 		case '\t':
 		case '\r':
@@ -3895,8 +3512,10 @@ state_key_values:
 			goto cleanup_on_error;
 
 		case '\n':
+#ifdef JSOP_PARSER_LOCATION
 			++cur_line;
 			cur_line_start = start;
+#endif
 		case ' ':
 		case '\t':
 		case '\r':
@@ -4014,8 +3633,10 @@ state_key_separator:
 			goto state_values;
 
 		case '\n':
+#ifdef JSOP_PARSER_LOCATION
 			++cur_line;
 			cur_line_start = start;
+#endif
 		case ' ':
 		case '\t':
 		case '\r':
@@ -4047,8 +3668,10 @@ state_key_values_separator_or_close:
 			goto action_object_close_brace;
 
 		case '\n':
+#ifdef JSOP_PARSER_LOCATION
 			++cur_line;
 			cur_line_start = start;
+#endif
 		case ' ':
 		case '\t':
 		case '\r':
@@ -4207,8 +3830,10 @@ action_unquoted_key_id_continue_test_special_chars:
 				goto cleanup_on_error;
 
 			case '\n':
+#ifdef JSOP_PARSER_LOCATION
 				++cur_line;
 				cur_line_start = start;
+#endif
 			case ' ':
 			case '\t':
 			case '\r':
@@ -4465,8 +4090,10 @@ state_single_line_comment:
 		++start;
 		switch (ch) {
 		case '\n':
+#ifdef JSOP_PARSER_LOCATION
 			++cur_line;
 			cur_line_start = start;
+#endif
 		case '\r':
 			CurrentState = LastState;
 			goto dispatch_state;
@@ -4533,8 +4160,10 @@ state_utf8_byte_order_mark_3:
 	if (start != end) {
 		ch = *start;
 		++start;
+#ifdef JSOP_PARSER_LOCATION
 		//Reset the column
 		cur_line_start = start;
+#endif
 		switch (ch) {
 		case 0xBF:
 			goto state_start;
