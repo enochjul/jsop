@@ -1440,7 +1440,6 @@ state_number:
 			goto cleanup_on_error;
 #endif
 		} else {
-action_number_not_a_digit:
 			switch (ch) {
 			case '.':
 				CurrentExponent = 0;
