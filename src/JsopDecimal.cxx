@@ -2665,13 +2665,13 @@ double jsop_decimal_to_double(uint64_t significand, int exponent, bool negative)
 	significand_high = static_cast<uint32_t>(significand >> 32);
 	if (exponent >= 0) {
 #ifdef JSOP_USE_FP_MATH
-		if (exponent < jsop_get_array_size(JsopPowersOfTen) && significand_high < (1U << (DBL_MANT_DIG - 32))) {
+		if (static_cast<unsigned>(exponent) < jsop_get_array_size(JsopPowersOfTen) && significand_high < (1U << (DBL_MANT_DIG - 32))) {
 			double product = static_cast<double>(static_cast<int64_t>(significand)) * JsopPowersOfTen[exponent];
 			return negative ? -product : product;
 		}
 #endif
 
-		if (exponent < jsop_get_array_size(JsopSmallPowersOfFive)) {
+		if (static_cast<unsigned>(exponent) < jsop_get_array_size(JsopSmallPowersOfFive)) {
 			power_of_five = JsopSmallPowersOfFive[exponent];
 			if (significand_high != 0) {
 				jsop_uint_multiply_1x1(&remainder, &mantissa_low, power_of_five, significand_low);
