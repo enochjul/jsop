@@ -9,16 +9,36 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <cstddef>
+#endif
+
 #include "JsopDefines.h"
 
 //! A singly linked list of memory pools
 class JsopMemoryPools final {
+#if defined(_MSC_VER) && !defined(__clang__)
+	typedef std::max_align_t max_align_type;
+#else
+	typedef max_align_t max_align_type;
+#endif
+
 public:
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(push)
+#pragma warning(disable:4200)
+#endif
+
 	struct Pool {
 		Pool *Next;
 		size_t Size;
-		alignas(max_align_t) uint8_t Data[];
+		alignas(max_align_type) uint8_t Data[];
 	};
+	static_assert(alignof(Pool) == alignof(max_align_type), "alignof(Pool) == alignof(max_align_type)");
+
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(pop)
+#endif
 
 private:
 	Pool *Head = nullptr;
@@ -28,7 +48,10 @@ private:
 
 	//! Allocates memory with the given size
 	template <size_t Alignment>
-	__attribute__((malloc, assume_aligned(Alignment))) void *allocate(const size_t aligned_size) noexcept;
+#if !(defined(_MSC_VER) && !defined(__clang__))
+	__attribute__((malloc, assume_aligned(Alignment), alloc_size(2), warn_unused_result))
+#endif
+	void *allocate(const size_t aligned_size) noexcept;
 
 public:
 	JsopMemoryPools() = default;

@@ -6,7 +6,7 @@
 #define JSOP_DEFINES_H
 
 #ifndef JSOP_WORD_SIZE
-	#ifdef __LP64__
+	#if defined(__LP64__) || defined(_WIN64)
 		#define JSOP_WORD_SIZE 64
 	#else
 		#define JSOP_WORD_SIZE 32
@@ -48,10 +48,19 @@
 #define JSOP_USE_FP_MATH
 
 #ifndef JSOP_INLINE
-#define JSOP_INLINE __attribute__((always_inline)) inline
+	#if defined(_MSC_VER) && !defined(__clang__)
+		#define JSOP_INLINE __forceinline
+	#else
+		#define JSOP_INLINE __attribute__((always_inline)) inline
+	#endif
 #endif
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#define JSOP_LIKELY(x) (x)
+#define JSOP_UNLIKELY(x) (x)
+#else
 #define JSOP_LIKELY(x) __builtin_expect(static_cast<bool>(x), true)
 #define JSOP_UNLIKELY(x) __builtin_expect(static_cast<bool>(x), false)
+#endif
 
 #endif

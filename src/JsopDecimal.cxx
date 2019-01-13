@@ -11,13 +11,23 @@
 #include <stddef.h>
 
 #ifndef JSOP_USE_CLZ
-	#if !defined(__i386__) && !defined(__amd64__)
-		#define JSOP_USE_CLZ
+	#if defined(_MSC_VER) && !defined(__clang__)
+		#if !defined(_M_IX86) && !defined(_M_X64)
+			#define JSOP_USE_CLZ
+		#endif
+	#else
+		#if !defined(__i386__) && !defined(__amd64__)
+			#define JSOP_USE_CLZ
+		#endif
 	#endif
 #endif
 
 #ifndef JSOP_USE_CLZ
-#include <x86intrin.h>
+	#if defined(_MSC_VER) && !defined(__clang__)
+		#include <intrin.h>
+	#else
+		#include <x86intrin.h>
+	#endif
 #endif
 
 #include "JsopDefines.h"
@@ -1934,7 +1944,13 @@ JSOP_INLINE constexpr size_t jsop_get_array_size(const T (&a)[N]) noexcept {
 JSOP_INLINE int jsop_uint_count_significant_bits(uint64_t value) noexcept {
 	assert(value != 0);
 #ifndef JSOP_USE_CLZ
-	return __bsrq(value) + 1;
+	#if defined(_MSC_VER) && !defined(__clang__)
+		unsigned long index;
+		_BitScanReverse64(&index, value);
+		return index + 1;
+	#else
+		return __bsrq(value) + 1;
+	#endif
 #else
 	return 64 - __builtin_clzll(value);
 #endif
@@ -1945,7 +1961,13 @@ JSOP_INLINE int jsop_uint_count_significant_bits(uint64_t value) noexcept {
 JSOP_INLINE int jsop_uint_count_significant_bits(uint32_t value) noexcept {
 	assert(value != 0);
 #ifndef JSOP_USE_CLZ
-	return _bit_scan_reverse(value) + 1;
+	#if defined(_MSC_VER) && !defined(__clang__)
+		unsigned long index;
+		_BitScanReverse(&index, value);
+		return index + 1;
+	#else
+		return _bit_scan_reverse(value) + 1;
+	#endif
 #else
 	return 32 - __builtin_clz(value);
 #endif
@@ -1954,11 +1976,15 @@ JSOP_INLINE int jsop_uint_count_significant_bits(uint32_t value) noexcept {
 #if JSOP_WORD_SIZE == 64
 //! Unsigned multiply of the given values a and b, and returns the result as 2 unsigned integers
 JSOP_INLINE void jsop_uint_multiply_1x1(uint64_t *low, uint64_t *high, uint64_t a, uint64_t b) noexcept {
+#if defined(_MSC_VER) && !defined(__clang__)
+	*low = _umul128(a, b, high);
+#else
 	unsigned __int128 p;
 
 	p = static_cast<unsigned __int128>(a) * b;
 	*low = static_cast<uint64_t>(p);
 	*high = static_cast<uint64_t>(p >> 64);
+#endif
 }
 #endif
 
@@ -1974,12 +2000,16 @@ JSOP_INLINE void jsop_uint_multiply_1x1(uint32_t *low, uint32_t *high, uint32_t 
 #if JSOP_WORD_SIZE == 64
 //! Unsigned addition of a double width integer a and an integer b, and returns the result as a double width integer
 JSOP_INLINE void jsop_uint_add_2x1(uint64_t *low, uint64_t *high, uint64_t a_low, uint64_t a_high, uint64_t b) noexcept {
+#if defined(_MSC_VER) && !defined(__clang__)
+	_addcarry_u64(_addcarry_u64(0, a_low, b, low), a_high, 0, high);
+#else
 	unsigned __int128 a;
 
 	a = (static_cast<unsigned __int128>(a_high) << 64) | a_low;
 	a += b;
 	*low = static_cast<uint64_t>(a);
 	*high = static_cast<uint64_t>(a >> 64);
+#endif
 }
 #endif
 
@@ -1996,11 +2026,15 @@ JSOP_INLINE void jsop_uint_add_2x1(uint32_t *low, uint32_t *high, uint32_t a_low
 #if JSOP_WORD_SIZE == 64
 //! Unsigned subtraction of the given integers a and b, and returns the result as a double width integer
 JSOP_INLINE void jsop_uint_subtract_1x1(uint64_t *low, uint64_t *high, uint64_t a, uint64_t b) noexcept {
+#if defined(_MSC_VER) && !defined(__clang__)
+	_subborrow_u64(_subborrow_u64(0, a, b, low), 0, 0, high);
+#else
 	unsigned __int128 d;
 
 	d = static_cast<unsigned __int128>(a) - b;
 	*low = static_cast<uint64_t>(d);
 	*high = static_cast<uint64_t>(d >> 64);
+#endif
 }
 #endif
 
@@ -2016,12 +2050,18 @@ JSOP_INLINE void jsop_uint_subtract_1x1(uint32_t *low, uint32_t *high, uint32_t 
 #if JSOP_WORD_SIZE == 64
 //! Unsigned subtraction with borrow of the given integers a and b, and returns the result as a double width integer
 JSOP_INLINE void jsop_uint_subtract_with_borrow_1x1(uint64_t *low, uint64_t *high, uint64_t a, uint64_t b, uint64_t borrow) noexcept {
+#if defined(_MSC_VER) && !defined(__clang__)
+	uint64_t difference_low, difference_high;
+	jsop_uint_subtract_1x1(&difference_low, &difference_high, a, b);
+	_addcarry_u64(_addcarry_u64(0, difference_low, borrow, low), difference_high, borrow, high);
+#else
 	unsigned __int128 d;
 
 	d = (static_cast<unsigned __int128>(borrow) << 64) | borrow;
 	d += static_cast<unsigned __int128>(a) - b;
 	*low = static_cast<uint64_t>(d);
 	*high = static_cast<uint64_t>(d >> 64);
+#endif
 }
 #endif
 
@@ -2038,6 +2078,9 @@ JSOP_INLINE void jsop_uint_subtract_with_borrow_1x1(uint32_t *low, uint32_t *hig
 #if JSOP_WORD_SIZE == 64
 //! Unsigned subtraction with borrow of the given double width integers a and b, and returns the result as a double width integer
 JSOP_INLINE void jsop_uint_subtract_2x2(uint64_t *low, uint64_t *high, uint64_t a_low, uint64_t a_high, uint64_t b_low, uint64_t b_high) noexcept {
+#if defined(_MSC_VER) && !defined(__clang__)
+	_subborrow_u64(_subborrow_u64(0, a_low, b_low, low), a_high, b_high, high);
+#else
 	unsigned __int128 a, b;
 
 	a = (static_cast<unsigned __int128>(a_high) << 64) | a_low;
@@ -2045,6 +2088,7 @@ JSOP_INLINE void jsop_uint_subtract_2x2(uint64_t *low, uint64_t *high, uint64_t 
 	a -= b;
 	*low = static_cast<uint64_t>(a);
 	*high = static_cast<uint64_t>(a >> 64);
+#endif
 }
 #endif
 
@@ -2510,7 +2554,7 @@ double jsop_decimal_to_double(uint64_t significand, int exponent, bool negative)
 				mantissa = *(full_product_end - 1);
 				mantissa_bits = jsop_uint_count_significant_bits(mantissa);
 				//Compute the exponent
-				final_exponent = exponent + mantissa_bits + ((full_product_end - full_product) - 1) * 64 - 1;
+				final_exponent = static_cast<int>(exponent + mantissa_bits + ((full_product_end - full_product) - 1) * 64 - 1);
 				//Normalize the mantissa and the remainder
 				remainder_bits = mantissa_bits - (DBL_MANT_DIG + 2);
 				if (remainder_bits > 0) {

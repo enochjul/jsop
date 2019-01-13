@@ -1405,14 +1405,14 @@ action_fractional_part_18_non_zero_digit:
 		if (JSOP_LIKELY(digit < 10)) {
 			current_integer = jsop_mul10_add_64(current_integer, digit);
 			CurrentInteger = current_integer;
-			CurrentExponent -= reinterpret_cast<uintptr_t>(token_end) - reinterpret_cast<uintptr_t>(start);
+			CurrentExponent -= static_cast<int>(reinterpret_cast<uintptr_t>(token_end) - reinterpret_cast<uintptr_t>(start));
 			start = token_end;
 			goto state_fractional_part;
 		}
 
 action_fractional_part_non_zero_digit_final:
 		CurrentInteger = current_integer;
-		CurrentExponent -= reinterpret_cast<uintptr_t>(token_end) - reinterpret_cast<uintptr_t>(start) - 1;
+		CurrentExponent -= static_cast<int>(reinterpret_cast<uintptr_t>(token_end) - reinterpret_cast<uintptr_t>(start) - 1);
 		start = token_end;
 		goto action_fractional_part_not_a_digit;
 	}
